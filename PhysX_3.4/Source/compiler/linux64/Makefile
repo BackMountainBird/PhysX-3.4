@@ -18,24 +18,24 @@ OBJCOPY   = objcopy
 
 Global_custom_cflags = -Wno-unused-function
 
-LowLevel_custom_cflags					= Global_custom_cflags
-LowLevelAABB_custom_cflags				= Global_custom_cflags
-LowLevelCloth_custom_cflags				= Global_custom_cflags
-LowLevelDynamics_custom_cflags			= Global_custom_cflags
-LowLevelParticles_custom_cflags			= Global_custom_cflags
-PhysX_custom_cflags						= Global_custom_cflags
-PhysXCharacterKinematic_custom_cflags	= Global_custom_cflags
-PhysXCommon_custom_cflags				= Global_custom_cflags
-PhysXCooking_custom_cflags				= Global_custom_cflags
-PhysXExtensions_custom_cflags			= Global_custom_cflags
-PhysXCooking_custom_cflags				= Global_custom_cflags
-PhysXVehicle_custom_cflags				= Global_custom_cflags
-PsFastXml_custom_cflags					= Global_custom_cflags
-PxFoundation_custom_cflags				= Global_custom_cflags
-PxPvdSDK_custom_cflags					= Global_custom_cflags
-PxTask_custom_cflags					= Global_custom_cflags
-SceneQuery_custom_cflags				= Global_custom_cflags
-SimulationController_custom_cflags		= Global_custom_cflags
+LowLevel_custom_cflags					= $(Global_custom_cflags)
+LowLevelAABB_custom_cflags				= $(Global_custom_cflags)
+LowLevelCloth_custom_cflags				= $(Global_custom_cflags)
+LowLevelDynamics_custom_cflags			= $(Global_custom_cflags)
+LowLevelParticles_custom_cflags			= $(Global_custom_cflags)
+PhysX_custom_cflags						= $(Global_custom_cflags)
+PhysXCharacterKinematic_custom_cflags	= $(Global_custom_cflags)
+PhysXCommon_custom_cflags				= $(Global_custom_cflags)
+PhysXCooking_custom_cflags				= $(Global_custom_cflags)
+PhysXExtensions_custom_cflags			= $(Global_custom_cflags)
+PhysXCooking_custom_cflags				= $(Global_custom_cflags)
+PhysXVehicle_custom_cflags				= $(Global_custom_cflags)
+PsFastXml_custom_cflags					= $(Global_custom_cflags)
+PxFoundation_custom_cflags				= $(Global_custom_cflags)
+PxPvdSDK_custom_cflags					= $(Global_custom_cflags)
+PxTask_custom_cflags					= $(Global_custom_cflags)
+SceneQuery_custom_cflags				= $(Global_custom_cflags)
+SimulationController_custom_cflags		= $(Global_custom_cflags)
 
 all: checked debug profile release 
 

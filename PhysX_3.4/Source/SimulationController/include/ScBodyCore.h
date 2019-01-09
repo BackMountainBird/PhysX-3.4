@@ -102,8 +102,10 @@ namespace Sc
 
 						void				addSpatialAcceleration(Ps::Pool<SimStateData>* simStateDataPool, const PxVec3* linAcc, const PxVec3* angAcc);
 						void				clearSpatialAcceleration(bool force, bool torque);
+						void				getSpatialAcceleration(PxVec3* linAcc, PxVec3* angAcc);
 						void				addSpatialVelocity(Ps::Pool<SimStateData>* simStateDataPool, const PxVec3* linVelDelta, const PxVec3* angVelDelta);
 						void				clearSpatialVelocity(bool force, bool torque);
+						void				getSpatialVelocity(PxVec3* linVelDelta, PxVec3* angVelDelta);
 
 		PX_FORCE_INLINE PxReal				getMaxPenetrationBias() const		{ return mCore.maxPenBias; }
 		PX_FORCE_INLINE void				setMaxPenetrationBias(PxReal p)		{ mCore.maxPenBias = p; }

@@ -132,7 +132,7 @@ Default values PxVec3(0,1,0), PxVec3(0,0,1)
 
 Call this function before using PxVehicleUpdates unless the default values are correct.
 */
-void PxVehicleSetBasisVectors(const PxVec3& up, const PxVec3& forward);
+void PxVehicleSetBasisVectors(const PxVec3& up, const PxVec3& forward, bool isLeftFrame = true);
 
 
 /**

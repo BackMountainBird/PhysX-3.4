@@ -38,6 +38,12 @@ class GuMeshFactory;
 
 namespace Gu
 {
+	class RTreeTriangleMesh;
+}
+void cloneRTreeTriangleMesh(Gu::RTreeTriangleMesh* clone, Gu::RTreeTriangleMesh* orig);
+
+namespace Gu
+{
 
 #if PX_VC
 #pragma warning(push)
@@ -68,6 +74,9 @@ class RTreeTriangleMesh : public TriangleMesh
 	PX_FORCE_INLINE				const Gu::RTree&		getRTree()				const	{ return mRTree; }
 	private:
 								Gu::RTree				mRTree;								
+
+								// Bleston:
+								friend void physx::cloneRTreeTriangleMesh(Gu::RTreeTriangleMesh* clone, Gu::RTreeTriangleMesh* orig);
 };
 
 #if PX_VC

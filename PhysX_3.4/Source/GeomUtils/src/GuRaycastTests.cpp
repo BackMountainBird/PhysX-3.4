@@ -477,7 +477,7 @@ PxU32 raycast_heightField(GU_RAY_FUNC_PARAMS)
 	const bool isDoubleSided = hfGeom.heightFieldFlags.isSet(PxMeshGeometryFlag::eDOUBLE_SIDED);
 	const bool bothSides = isDoubleSided || (hitFlags & PxHitFlag::eMESH_BOTH_SIDES);
 
-	const HeightFieldUtil hfUtil(hfGeom);
+	const HeightFieldTraceUtil hfUtil(hfGeom);
 
 	PxVec3 normRayDir = localRayDir;
 	normRayDir.normalizeSafe(); // nothing will happen if length is < PX_NORMALIZATION_EPSILON
@@ -486,6 +486,12 @@ PxU32 raycast_heightField(GU_RAY_FUNC_PARAMS)
 	// to deal with precision issues with large maxDist
 	PxBounds3 hfLocalBounds;
 	hfUtil.computeLocalBounds(hfLocalBounds);
+
+	// PT: inflate the bounds like we do in the scene-tree (see PX-1179)
+	const PxVec3 center = hfLocalBounds.getCenter();
+	const PxVec3 extents = hfLocalBounds.getExtents() * 1.01f;	//SQ_PRUNER_INFLATION;
+	hfLocalBounds.minimum = center - extents;
+	hfLocalBounds.maximum = center + extents;
 
 	PxVec3 localImpact;
 	PxReal t;	// closest intersection, t==0 hit inside

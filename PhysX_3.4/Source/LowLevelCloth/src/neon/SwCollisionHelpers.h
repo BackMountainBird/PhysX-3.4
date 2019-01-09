@@ -29,7 +29,9 @@
 
 #pragma once
 
-#ifdef _M_ARM
+#include "foundation/PxPreprocessor.h"
+
+#ifdef PX_M_ARM
 #include <arm_neon.h>
 #endif
 
@@ -40,7 +42,7 @@ namespace cloth
 
 uint32_t findBitSet(uint32_t mask)
 {
-#ifdef _M_ARM
+#ifdef PX_M_ARM
 	__n64 t = { mask };
 	return 31 - (vclz_u32(t)).n64_u32[0];
 #else

@@ -123,6 +123,18 @@ PxFilterFlags PxDefaultSimulationFilterShader(
 	PxU32 constantBlockSize);
 
 /**
+\brief Same as PxDefaultSimulationFilterShader except for trigger
+*/
+PxFilterFlags PxDefaultSimulationFilterShader2(
+	PxFilterObjectAttributes attributes0,
+	PxFilterData filterData0,
+	PxFilterObjectAttributes attributes1,
+	PxFilterData filterData1,
+	PxPairFlags& pairFlags,
+	const void* constantBlock,
+	PxU32 constantBlockSize);
+
+/**
 	\brief Determines if collision detection is performed between a pair of groups
 
 	\note Collision group is an integer between 0 and 31.

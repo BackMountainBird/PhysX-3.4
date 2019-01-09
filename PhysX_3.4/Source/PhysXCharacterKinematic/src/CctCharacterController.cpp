@@ -31,6 +31,7 @@
 #include "CctCharacterController.h"
 #include "CctCharacterControllerManager.h"
 #include "CctSweptBox.h"
+#include "CctSweptOBB.h"
 #include "CctSweptCapsule.h"
 #include "CctObstacleContext.h"
 #include "PxRigidDynamic.h"
@@ -39,13 +40,19 @@
 #include "GuIntersectionBoxBox.h"
 #include "GuDistanceSegmentBox.h"
 #include "PxMeshQuery.h"
+#include "CctRotatableController.h"
 #include "PsFPU.h"
+
+#include "GuCylinder.h"
+#include "GuSweepCylinderCylinder.h"
 
 // PT: TODO: remove those includes.... shouldn't be allowed from here
 #include "PxControllerObstacles.h"	// (*)
 #include "CctInternalStructs.h"		// (*)
 #include "PxControllerManager.h"	// (*)
 #include "PxControllerBehavior.h"	// (*)
+
+#include <cmath>
 
 //#define DEBUG_MTD
 #ifdef DEBUG_MTD
@@ -161,6 +168,35 @@ static PX_INLINE void collisionResponse(PxExtendedVec3& targetPosition, const Px
 	}
 }
 
+static PX_INLINE void collisionResponse2(PxExtendedVec3& targetPosition, const PxExtendedVec3& currentPosition, const PxVec3& currentDir, const PxVec3& hitNormal, const PxVec3& leftDir, PxF32 bump, PxF32 friction)
+{
+	// Compute reflect direction
+	PxVec3 reflectDir;
+	computeReflexionVector(reflectDir, currentDir, hitNormal);
+	reflectDir.normalize();
+
+	// Decompose it
+	PxVec3 normalCompo, tangentCompo;
+	Ps::decomposeVector(normalCompo, tangentCompo, reflectDir, hitNormal);
+
+	// Compute new destination position
+	const PxExtended amplitude = (targetPosition - currentPosition).magnitude();
+
+	targetPosition = currentPosition;
+	if (bump != 0.0f)
+	{
+		normalCompo.normalize();
+		targetPosition += normalCompo * float(bump*amplitude);
+	}
+	if (friction != 0.0)
+	{
+		if (tangentCompo.magnitude() == 0.0f)
+			tangentCompo = leftDir;
+		tangentCompo.normalize();
+		targetPosition += tangentCompo * float(friction*amplitude);
+	}
+}
+
 static PX_INLINE void relocateBox(PxBoxGeometry& boxGeom, PxTransform& pose, const PxExtendedVec3& center, const PxVec3& extents, const PxExtendedVec3& origin, const PxQuat& quatFromUp)
 {
 	boxGeom.halfExtents = extents;
@@ -217,6 +253,35 @@ static PX_INLINE void relocateCapsule(PxCapsuleGeometry& capsuleGeom, PxTransfor
 	p1.z = float(userCapsule.mCapsule.p1.z - userCapsule.mOffset.z);
 
 	relocateCapsule(capsuleGeom, pose, p0, p1, userCapsule.mCapsule.radius);
+}
+
+static PX_INLINE void relocateCylinder(Gu::Cylinder& cylinder,
+	const SweptCapsule* sc, const PxVec3& upVec,
+	const PxExtendedVec3& center, const PxExtendedVec3& origin)
+{
+	cylinder.radius = sc->mRadius;
+	PxVec3 dir = upVec.getNormalized() * sc->mHalfHeight;
+
+	cylinder.p0.x = PxReal(center.x - origin.x - dir.x);
+	cylinder.p0.y = PxReal(center.y - origin.y - dir.y);
+	cylinder.p0.z = PxReal(center.z - origin.z - dir.z);
+	cylinder.p1.x = PxReal(center.x - origin.x + dir.x);
+	cylinder.p1.y = PxReal(center.y - origin.y + dir.y);
+	cylinder.p1.z = PxReal(center.z - origin.z + dir.z);
+}
+
+static PX_INLINE void relocateCylinder(Gu::Cylinder& cylinder, const TouchedUserCapsule& userCapsule)
+{
+	PxVec3 dir = (userCapsule.mCapsule.p1 - userCapsule.mCapsule.p0).getNormalized() * userCapsule.mCapsule.radius;
+	cylinder.p0.x = PxReal(userCapsule.mCapsule.p0.x - userCapsule.mOffset.x);
+	cylinder.p0.y = PxReal(userCapsule.mCapsule.p0.y - userCapsule.mOffset.y);
+	cylinder.p0.z = PxReal(userCapsule.mCapsule.p0.z - userCapsule.mOffset.z);
+	cylinder.p1.x = PxReal(userCapsule.mCapsule.p1.x - userCapsule.mOffset.x);
+	cylinder.p1.y = PxReal(userCapsule.mCapsule.p1.y - userCapsule.mOffset.y);
+	cylinder.p1.z = PxReal(userCapsule.mCapsule.p1.z - userCapsule.mOffset.z);
+	cylinder.p0 -= dir;
+	cylinder.p1 += dir;
+	cylinder.radius = userCapsule.mCapsule.radius;
 }
 
 static bool SweepBoxUserBox(const SweepTest* test, const SweptVolume* volume, const TouchedGeom* geom, const PxExtendedVec3& center, const PxVec3& dir, SweptContact& impact)
@@ -323,6 +388,33 @@ static bool sweepVolumeVsMesh(	const SweepTest* sweepTest, const TouchedMesh* to
 	return false;
 }
 
+static bool raycastVsMesh(const SweepTest* sweepTest, const TouchedMesh* touchedMesh, SweptContact& impact,
+	const PxVec3& rayOrig, const PxVec3& unitDir, PxU32 nbTris, const PxTriangle* triangles, PxU32 cachedIndex, const PxReal approxDist)
+{
+	PxRaycastHit raycastHit;
+	if (PxMeshQuery::raycast(rayOrig, unitDir, impact.mDistance + approxDist, nbTris, triangles, raycastHit, getSweepHitFlags(sweepTest->mUserParams), &cachedIndex))
+	{
+		raycastHit.distance -= approxDist;
+		if (raycastHit.distance >= impact.mDistance)
+			return false;
+
+		impact.mDistance = PxMax(raycastHit.distance, 0.0f);
+		impact.mWorldNormal = raycastHit.normal;
+		impact.setWorldPos(raycastHit.position, touchedMesh->mOffset);
+
+		// Returned index is only between 0 and nbTris, i.e. it indexes the array of cached triangles, not the original mesh.
+		PX_ASSERT(raycastHit.faceIndex < nbTris);
+		sweepTest->mCachedTriIndex[sweepTest->mCachedTriIndexIndex] = raycastHit.faceIndex;
+
+		// The CCT loop will use the index from the start of the cache...
+		impact.mInternalIndex = raycastHit.faceIndex + touchedMesh->mIndexWorldTriangles;
+		const PxU32* triangleIndices = &sweepTest->mTriangleIndices[touchedMesh->mIndexWorldTriangles];
+		impact.mTriangleIndex = triangleIndices[raycastHit.faceIndex];
+		return true;
+	}
+	return false;
+}
+
 static bool SweepBoxMesh(const SweepTest* sweep_test, const SweptVolume* volume, const TouchedGeom* geom, const PxExtendedVec3& center, const PxVec3& dir, SweptContact& impact)
 {
 	PX_ASSERT(volume->getType()==SweptVolumeType::eBOX);
@@ -370,11 +462,41 @@ static bool SweepCapsuleMesh(
 	if(CachedIndex>=nbTris)
 		CachedIndex=0;
 
-	PxCapsuleGeometry capsuleGeom;
-	PxTransform capsulePose;
-	relocateCapsule(capsuleGeom, capsulePose, SC, sweep_test->mUserParams.mQuatFromUp, center, TM->mOffset);
+	if (sweep_test->mUserParams.mOptimizeFlags & PxControllerOptimizeFlag::eOPTIMIZE_RAYCAST)
+	{
+		// Use raycast to approximate sweep
+		PxVec3 dirDown, dirSide;
+		Ps::decomposeVector(dirDown, dirSide, dir, -(sweep_test->mUserParams.mUpDirection));
+		PxReal dirDownM = dirDown.magnitude();
+		PxReal dirSideM = dirSide.magnitude();
+		PxReal downDist = 1e3, sideDist = 1e3;
+		if (dirDownM > 0.1f)
+		{
+			downDist = volume->mHalfHeight / dirDownM;
+		}
+		if (dirSideM > 0.1f)
+		{
+			sideDist = SC->mRadius / dirSideM;
+		}
+		auto rayOrig = volume->mCenter - TM->mOffset;
+		PxReal approximateDist = downDist;
+		if (downDist > sideDist)
+		{
+			rayOrig = rayOrig - sweep_test->mUserParams.mUpDirection * volume->mHalfHeight;
+			approximateDist = sideDist;
+		}
+		return raycastVsMesh(sweep_test, TM, impact, rayOrig, dir, nbTris, T, CachedIndex, approximateDist);
+	}
+	else
+	{
+		PxCapsuleGeometry capsuleGeom;
+		PxTransform capsulePose;
+		relocateCapsule(capsuleGeom, capsulePose, SC, sweep_test->mUserParams.mQuatFromUp, center, TM->mOffset);
 
-	return sweepVolumeVsMesh(sweep_test, TM, impact, dir, capsuleGeom, capsulePose, nbTris, T, CachedIndex);
+		return sweepVolumeVsMesh(sweep_test, TM, impact, dir, capsuleGeom, capsulePose, nbTris, T, CachedIndex);
+	}
+
+	return false;
 }
 
 static bool SweepBoxBox(const SweepTest* test, const SweptVolume* volume, const TouchedGeom* geom, const PxExtendedVec3& center, const PxVec3& dir, SweptContact& impact)
@@ -639,6 +761,56 @@ static bool SweepCapsuleUserCapsule(const SweepTest* test, const SweptVolume* vo
 	return true;
 }
 
+static bool SweepCapsuleUserCapsuleExt(const SweepTest* test, const SweptVolume* volume, const TouchedGeom* geom, const PxExtendedVec3& center, const PxVec3& dir, SweptContact& impact)
+{
+	PX_ASSERT(volume->getType() == SweptVolumeType::eCAPSULE);
+	PX_ASSERT(geom->mType == TouchedGeomType::eUSER_CAPSULE);
+	const SweptCapsule* SC = static_cast<const SweptCapsule*>(volume);
+	const TouchedUserCapsule* TC = static_cast<const TouchedUserCapsule*>(geom);
+
+	PxSweepHit sweepHit;
+	PxVec3 TCDir;
+	TC->mCapsule.computeDirection(TCDir);
+	if (Ps::parallelDirection(test->mUserParams.mUpDirection, TCDir))
+	{
+		// Paralleled cct. We can use cylinder for more good result.
+		Gu::Cylinder cylinder0;
+		Gu::Cylinder cylinder1;
+		relocateCylinder(cylinder0, SC, test->mUserParams.mUpDirection, center, TC->mOffset);
+		relocateCylinder(cylinder1, *TC);
+		PxU16 outHintFlags;
+		if (!Gu::sweepCylinderCylinder_ParallelSpecial(cylinder0, cylinder1,
+			dir, impact.mDistance,
+			sweepHit.distance, sweepHit.position, sweepHit.normal,
+			getSweepHitFlags(test->mUserParams), outHintFlags))
+			return false;
+	}
+	else
+	{
+		// Continue to use capsule.
+		PxCapsuleGeometry capsuleGeom0;
+		PxTransform capsulePose0;
+		relocateCapsule(capsuleGeom0, capsulePose0, SC, test->mUserParams.mQuatFromUp, center, TC->mOffset);
+
+		PxCapsuleGeometry capsuleGeom1;
+		PxTransform capsulePose1;
+		relocateCapsule(capsuleGeom1, capsulePose1, *TC);
+
+		if (!PxGeometryQuery::sweep(dir, impact.mDistance, capsuleGeom0, capsulePose0, capsuleGeom1, capsulePose1, sweepHit, getSweepHitFlags(test->mUserParams)))
+			return false;
+	}
+
+	if (sweepHit.distance >= impact.mDistance)
+		return false;
+
+	impact.mDistance = sweepHit.distance;
+	impact.mWorldNormal = sweepHit.normal;
+	impact.mInternalIndex = PX_INVALID_U32;
+	impact.mTriangleIndex = PX_INVALID_U32;
+	impact.setWorldPos(sweepHit.position, TC->mOffset);
+	return true;
+}
+
 static bool SweepCapsuleUserBox(const SweepTest* test, const SweptVolume* volume, const TouchedGeom* geom, const PxExtendedVec3& center, const PxVec3& dir, SweptContact& impact)
 {
 	PX_ASSERT(volume->getType()==SweptVolumeType::eCAPSULE);
@@ -684,6 +856,197 @@ static bool SweepCapsuleUserBox(const SweepTest* test, const SweptVolume* volume
 	return true;
 }
 
+static bool SweepOBBBox(const SweepTest* test, const SweptVolume* volume, const TouchedGeom* geom, const PxExtendedVec3& center, const PxVec3& dir, SweptContact& impact)
+{
+	PX_ASSERT(volume->getType() == SweptVolumeType::eBOX);
+	PX_ASSERT(geom->mType == TouchedGeomType::eBOX);
+	const SweptBox* SB = static_cast<const SweptBox*>(volume);
+	const TouchedBox* TB = static_cast<const TouchedBox*>(geom);
+
+	PxBoxGeometry boxGeom0;
+	PxTransform boxPose0;
+	PxQuat rotQuat = GetRotateQuat(SB->mOrient, test->mUserParams.mUpDirection, test->mUserParams.mQuatFromUp);
+	// To precompute
+	relocateBox(boxGeom0, boxPose0, center, SB->mExtents, TB->mOffset, rotQuat);
+
+	PxBoxGeometry boxGeom1;
+	PxTransform boxPose1;
+	relocateBox(boxGeom1, boxPose1, *TB);
+
+	PxSweepHit sweepHit;
+	if (!PxGeometryQuery::sweep(dir, impact.mDistance, boxGeom0, boxPose0, boxGeom1, boxPose1, sweepHit, getSweepHitFlags(test->mUserParams)))
+		return false;
+
+	if (sweepHit.distance >= impact.mDistance)
+		return false;
+
+	impact.mWorldNormal = sweepHit.normal;
+	impact.mDistance = sweepHit.distance;
+	impact.mInternalIndex = PX_INVALID_U32;
+	impact.mTriangleIndex = PX_INVALID_U32;
+	impact.setWorldPos(sweepHit.position, TB->mOffset);
+	return true;
+}
+
+static bool SweepOBBCapsule(const SweepTest* test, const SweptVolume* volume, const TouchedGeom* geom, const PxExtendedVec3& center, const PxVec3& dir, SweptContact& impact)
+{
+	PX_ASSERT(volume->getType() == SweptVolumeType::eOBB);
+	PX_ASSERT(geom->mType == TouchedGeomType::eCAPSULE);
+	const SweptOBB* SB = static_cast<const SweptOBB*>(volume);
+	const TouchedCapsule* TC = static_cast<const TouchedCapsule*>(geom);
+
+	PxBoxGeometry boxGeom;
+	PxTransform boxPose;
+	PxQuat rotQuat = GetRotateQuat(SB->mOrient, test->mUserParams.mUpDirection, test->mUserParams.mQuatFromUp);
+	// To precompute
+	relocateBox(boxGeom, boxPose, center, SB->mExtents, TC->mOffset, rotQuat);
+
+	PxCapsuleGeometry capsuleGeom;
+	PxTransform capsulePose;
+	relocateCapsule(capsuleGeom, capsulePose, TC->mP0, TC->mP1, TC->mRadius);
+
+	PxSweepHit sweepHit;
+	if (!PxGeometryQuery::sweep(dir, impact.mDistance, boxGeom, boxPose, capsuleGeom, capsulePose, sweepHit, getSweepHitFlags(test->mUserParams)))
+		return false;
+
+	if (sweepHit.distance >= impact.mDistance)
+		return false;
+
+	impact.mDistance = sweepHit.distance;
+	impact.mWorldNormal = sweepHit.normal;
+	impact.mInternalIndex = PX_INVALID_U32;
+	impact.mTriangleIndex = PX_INVALID_U32;
+	{
+		impact.setWorldPos(sweepHit.position, TC->mOffset);
+	}
+	return true;
+}
+
+static bool SweepOBBMesh(const SweepTest* test, const SweptVolume* volume, const TouchedGeom* geom, const PxExtendedVec3& center, const PxVec3& dir, SweptContact& impact)
+{
+	PX_ASSERT(volume->getType() == SweptVolumeType::eOBB);
+	PX_ASSERT(geom->mType == TouchedGeomType::eMESH);
+	const SweptOBB* SB = static_cast<const SweptOBB*>(volume);
+	const TouchedMesh* TM = static_cast<const TouchedMesh*>(geom);
+
+	PxU32 nbTris = TM->mNbTris;
+	if (!nbTris)
+		return false;
+
+	// Fetch triangle data for current mesh (the stream may contain triangles from multiple meshes)
+	const PxTriangle* T = &test->mWorldTriangles.getTriangle(TM->mIndexWorldTriangles);
+
+	// PT: this only really works when the CCT collides with a single mesh, but that's the most common case. When it doesn't, there's just no speedup but it still works.
+	PxU32 CachedIndex = test->mCachedTriIndex[test->mCachedTriIndexIndex];
+	if (CachedIndex >= nbTris)
+		CachedIndex = 0;
+
+	PxBoxGeometry boxGeom;
+	boxGeom.halfExtents = SB->mExtents;
+	PxQuat rotQuat = GetRotateQuat(SB->mOrient, test->mUserParams.mUpDirection, test->mUserParams.mQuatFromUp);
+	PxTransform boxPose(PxVec3(float(center.x - TM->mOffset.x), float(center.y - TM->mOffset.y), float(center.z - TM->mOffset.z)), rotQuat);  // Precompute
+	return sweepVolumeVsMesh(test, TM, impact, dir, boxGeom, boxPose, nbTris, T, CachedIndex);
+}
+
+static bool SweepOBBSphere(const SweepTest* test, const SweptVolume* volume, const TouchedGeom* geom, const PxExtendedVec3& center, const PxVec3& dir, SweptContact& impact)
+{
+	PX_ASSERT(volume->getType() == SweptVolumeType::eOBB);
+	PX_ASSERT(geom->mType == TouchedGeomType::eSPHERE);
+	const SweptOBB* SB = static_cast<const SweptOBB*>(volume);
+	const TouchedSphere* TS = static_cast<const TouchedSphere*>(geom);
+
+	PxBoxGeometry boxGeom;
+	PxTransform boxPose;
+	PxQuat rotQuat = GetRotateQuat(SB->mOrient, test->mUserParams.mUpDirection, test->mUserParams.mQuatFromUp);
+	// To precompute
+	relocateBox(boxGeom, boxPose, center, SB->mExtents, TS->mOffset, rotQuat);
+
+	PxSphereGeometry sphereGeom;
+	sphereGeom.radius = TS->mRadius;
+	PxTransform spherePose;
+	spherePose.p = TS->mCenter;
+	spherePose.q = PxQuat(PxIdentity);
+
+	PxSweepHit sweepHit;
+	if (!PxGeometryQuery::sweep(dir, impact.mDistance, boxGeom, boxPose, sphereGeom, spherePose, sweepHit, getSweepHitFlags(test->mUserParams)))
+		return false;
+
+	impact.mDistance = sweepHit.distance;
+	impact.mWorldNormal = sweepHit.normal;
+	impact.mInternalIndex = PX_INVALID_U32;
+	impact.mTriangleIndex = PX_INVALID_U32;
+	{
+		impact.setWorldPos(sweepHit.position, TS->mOffset);
+	}
+	return true;
+}
+
+static bool SweepOBBUserBox(const SweepTest* test, const SweptVolume* volume, const TouchedGeom* geom, const PxExtendedVec3& center, const PxVec3& dir, SweptContact& impact)
+{
+	PX_ASSERT(volume->getType() == SweptVolumeType::eOBB);
+	PX_ASSERT(geom->mType == TouchedGeomType::eUSER_BOX);
+	const SweptOBB* SB = static_cast<const SweptOBB*>(volume);
+	const TouchedUserBox* TC = static_cast<const TouchedUserBox*>(geom);
+
+	PxBoxGeometry boxGeom0;
+	PxTransform boxPose0;
+	PxQuat rotQuat = GetRotateQuat(SB->mOrient, test->mUserParams.mUpDirection, test->mUserParams.mQuatFromUp);
+	// To precompute
+	relocateBox(boxGeom0, boxPose0, center, SB->mExtents, TC->mOffset, rotQuat);
+
+	PxBoxGeometry boxGeom1;
+	PxTransform boxPose1;
+	relocateBox(boxGeom1, boxPose1, *TC);
+
+	PxSweepHit sweepHit;
+	if (!PxGeometryQuery::sweep(dir, impact.mDistance, boxGeom0, boxPose0, boxGeom1, boxPose1, sweepHit, getSweepHitFlags(test->mUserParams)))
+		return false;
+
+	if (sweepHit.distance >= impact.mDistance)
+		return false;
+
+	impact.mWorldNormal = sweepHit.normal;
+	impact.mDistance = sweepHit.distance;
+	impact.mInternalIndex = PX_INVALID_U32;
+	impact.mTriangleIndex = PX_INVALID_U32;
+	impact.setWorldPos(sweepHit.position, TC->mOffset);
+	return true;
+}
+
+static bool SweepOBBUserCapsule(const SweepTest* test, const SweptVolume* volume, const TouchedGeom* geom, const PxExtendedVec3& center, const PxVec3& dir, SweptContact& impact)
+{
+	PX_ASSERT(volume->getType() == SweptVolumeType::eOBB);
+	PX_ASSERT(geom->mType == TouchedGeomType::eUSER_CAPSULE);
+	const SweptOBB* SB = static_cast<const SweptOBB*>(volume);
+	const TouchedUserCapsule* TC = static_cast<const TouchedUserCapsule*>(geom);
+
+	PxBoxGeometry boxGeom;
+	PxTransform boxPose;
+	PxQuat rotQuat = GetRotateQuat(SB->mOrient, test->mUserParams.mUpDirection, test->mUserParams.mQuatFromUp);
+	// To precompute
+	relocateBox(boxGeom, boxPose, center, SB->mExtents, TC->mOffset, rotQuat);
+
+	PxCapsuleGeometry capsuleGeom;
+	PxTransform capsulePose;
+	relocateCapsule(capsuleGeom, capsulePose, *TC);
+
+	PxSweepHit sweepHit;
+	if (!PxGeometryQuery::sweep(dir, impact.mDistance, boxGeom, boxPose, capsuleGeom, capsulePose, sweepHit, getSweepHitFlags(test->mUserParams)))
+		return false;
+
+	if (sweepHit.distance >= impact.mDistance)
+		return false;
+
+	impact.mDistance = sweepHit.distance;
+	impact.mWorldNormal = sweepHit.normal;
+	impact.mInternalIndex = PX_INVALID_U32;
+	impact.mTriangleIndex = PX_INVALID_U32;
+	{
+		impact.setWorldPos(sweepHit.position, TC->mOffset);
+	}
+	return true;
+}
+
 typedef bool (*SweepFunc) (const SweepTest*, const SweptVolume*, const TouchedGeom*, const PxExtendedVec3&, const PxVec3&, SweptContact&);
 
 static SweepFunc gSweepMap[SweptVolumeType::eLAST][TouchedGeomType::eLAST] = {
@@ -705,6 +1068,16 @@ static SweepFunc gSweepMap[SweptVolumeType::eLAST][TouchedGeomType::eLAST] = {
 	SweepCapsuleBox,
 	SweepCapsuleSphere,
 	SweepCapsuleCapsule
+	},
+
+	// Rotatable funcs
+	{
+	SweepOBBUserBox,
+	SweepOBBUserCapsule,
+	SweepOBBMesh,
+	SweepOBBBox,
+	SweepOBBSphere,
+	SweepOBBCapsule
 	}
 };
 
@@ -720,9 +1093,11 @@ static const PxU32 GeomSizes[] =
 	sizeof(TouchedCapsule),
 };
 
+PX_COMPILE_TIME_ASSERT(sizeof(GeomSizes)==TouchedGeomType::eLAST*sizeof(PxU32));
+
 static const TouchedGeom* CollideGeoms(
 	const SweepTest* sweep_test, const SweptVolume& volume, const IntArray& geom_stream,
-	const PxExtendedVec3& center, const PxVec3& dir, SweptContact& impact, bool discardInitialOverlap)
+	const PxExtendedVec3& center, const PxVec3& dir, SweptContact& impact, bool discardInitialOverlap, SweepPass sweepPass)
 {
 	impact.mInternalIndex	= PX_INVALID_U32;
 	impact.mTriangleIndex	= PX_INVALID_U32;
@@ -741,6 +1116,11 @@ static const TouchedGeom* CollideGeoms(
 			C.mDistance			= impact.mDistance;	// Initialize with current best distance
 			C.mInternalIndex	= PX_INVALID_U32;
 			C.mTriangleIndex	= PX_INVALID_U32;
+			if (sweepPass == SWEEP_PASS_SIDE && ST == SweepCapsuleUserCapsule)
+			{
+				// The side pass should use cylinder as possible.
+				ST = SweepCapsuleUserCapsuleExt;
+			}
 			if((ST)(sweep_test, &volume, CurrentGeom, center, dir, C))
 			{
 				if(C.mDistance==0.0f)
@@ -823,18 +1203,27 @@ static PxVec3 computeMTD(const SweepTest* sweep_test, const SweptVolume& volume,
 					PxVec3 mtd;
 					PxF32 depth;
 
-					const PxTransform volumePose(p, sweep_test->mUserParams.mQuatFromUp);
 					if(volume.getType()==SweptVolumeType::eCAPSULE)
 					{
 						const SweptCapsule& sc = static_cast<const SweptCapsule&>(volume);
 						const PxCapsuleGeometry capsuleGeom(sc.mRadius+contactOffset, sc.mHeight*0.5f);
+						const PxTransform volumePose(p, sweep_test->mUserParams.mQuatFromUp);
 						isValid = PxGeometryQuery::computePenetration(mtd, depth, capsuleGeom, volumePose, gh.any(), globalPose);
+					}
+					else if (volume.getType() == SweptVolumeType::eOBB)
+					{
+						const SweptOBB& so = static_cast<const SweptOBB&>(volume);
+						const PxBoxGeometry boxGeom(so.mExtents + PxVec3(contactOffset));
+						PxTransform volumePose(p, sweep_test->mUserParams.mQuatFromUp);
+						volumePose.q = GetRotateQuat(so.mOrient, sweep_test->mUserParams.mUpDirection, sweep_test->mUserParams.mQuatFromUp);
+						isValid = PxGeometryQuery::computePenetration(mtd, depth, boxGeom, volumePose, gh.any(), globalPose);
 					}
 					else
 					{
 						PX_ASSERT(volume.getType()==SweptVolumeType::eBOX);
 						const SweptBox& sb = static_cast<const SweptBox&>(volume);
 						const PxBoxGeometry boxGeom(sb.mExtents+PxVec3(contactOffset));
+						const PxTransform volumePose(p, sweep_test->mUserParams.mQuatFromUp);
 						isValid = PxGeometryQuery::computePenetration(mtd, depth, boxGeom, volumePose, gh.any(), globalPose);
 					}
 
@@ -868,6 +1257,125 @@ static PxVec3 computeMTD(const SweepTest* sweep_test, const SweptVolume& volume,
 }
 
 
+static TouchedGeom* OverlapGeoms(const SweepTest* sweep_test, const SweptVolume& volume, const IntArray& geom_stream, const PxExtendedVec3& center, const PxF32 orient, float contactOffset)
+{
+	PX_ASSERT(volume.getType() == SweptVolumeType::eOBB);
+
+	PxExtendedVec3 ExtOrigin;	// Will be TouchedGeom::mOffset
+	getCenter(sweep_test->mCacheBounds, ExtOrigin);
+	PxVec3 Origin = toVec3(ExtOrigin);
+
+	const SweptOBB& obb = static_cast<const SweptOBB&>(volume);
+	const PxBoxGeometry volumeGeom(obb.mExtents + PxVec3(contactOffset));
+	const PxQuat rotQuat = GetRotateQuat(orient, sweep_test->mUserParams.mUpDirection, sweep_test->mUserParams.mQuatFromUp);
+	const PxTransform volumePose(center - ExtOrigin, rotQuat);
+
+	const PxU32* Data = geom_stream.begin();
+	const PxU32* Last = geom_stream.end();
+	while (Data != Last)
+	{
+		TouchedGeom* CurrentGeom = (TouchedGeom*)Data;
+
+		PxGeometryHolder gh;
+		PxTransform globalPose;
+
+		if (CurrentGeom->mType == TouchedGeomType::eUSER_BOX)
+		{
+			const TouchedUserBox* TC = static_cast<const TouchedUserBox*>(CurrentGeom);
+			PxBoxGeometry boxGeom;
+			relocateBox(boxGeom, globalPose, *TC);
+			gh.storeAny(boxGeom);
+		}
+		else if (CurrentGeom->mType == TouchedGeomType::eUSER_CAPSULE)
+		{
+			const TouchedUserCapsule* TC = static_cast<const TouchedUserCapsule*>(CurrentGeom);
+			PxCapsuleGeometry capsuleGeom;
+			relocateCapsule(capsuleGeom, globalPose, *TC);
+			gh.storeAny(capsuleGeom);
+		}
+		else
+		{
+			const PxRigidActor* touchedActor = CurrentGeom->mActor;
+			PX_ASSERT(touchedActor);
+
+			PxShape* touchedShape = (PxShape*)CurrentGeom->mTGUserData;
+			PX_ASSERT(touchedShape);
+
+			gh = touchedShape->getGeometry();
+			globalPose = getShapeGlobalPose(*touchedShape, *touchedActor);
+			globalPose.p -= Origin;
+		}
+
+		if (PxGeometryQuery::overlap(volumeGeom, volumePose, gh.any(), globalPose))
+			return CurrentGeom;
+
+		PxU8* ptr = (PxU8*)Data;
+		ptr += GeomSizes[CurrentGeom->mType];
+		Data = (const PxU32*)ptr;
+	}
+	return nullptr;
+}
+
+
+static TouchedGeom* OverlapGeomsWithMTD(PxVec3& mtd, PxF32& depth, const SweepTest* sweep_test, const SweptVolume& volume, const IntArray& geom_stream, const PxExtendedVec3& center, const PxF32 orient, float contactOffset)
+{
+	PX_ASSERT(volume.getType() == SweptVolumeType::eOBB);
+
+	PxExtendedVec3 ExtOrigin;	// Will be TouchedGeom::mOffset
+	getCenter(sweep_test->mCacheBounds, ExtOrigin);
+	PxVec3 Origin = toVec3(ExtOrigin);
+
+	const SweptOBB& obb = static_cast<const SweptOBB&>(volume);
+	const PxBoxGeometry volumeGeom(obb.mExtents + PxVec3(contactOffset));
+	const PxQuat rotQuat = GetRotateQuat(orient, sweep_test->mUserParams.mUpDirection, sweep_test->mUserParams.mQuatFromUp);
+	const PxTransform volumePose(center - ExtOrigin, rotQuat);
+
+	const PxU32* Data = geom_stream.begin();
+	const PxU32* Last = geom_stream.end();
+	while (Data != Last)
+	{
+		TouchedGeom* CurrentGeom = (TouchedGeom*)Data;
+
+		PxGeometryHolder gh;
+		PxTransform globalPose;
+
+		if (CurrentGeom->mType == TouchedGeomType::eUSER_BOX)
+		{
+			const TouchedUserBox* TC = static_cast<const TouchedUserBox*>(CurrentGeom);
+			PxBoxGeometry boxGeom;
+			relocateBox(boxGeom, globalPose, *TC);
+			gh.storeAny(boxGeom);
+		}
+		else if (CurrentGeom->mType == TouchedGeomType::eUSER_CAPSULE)
+		{
+			const TouchedUserCapsule* TC = static_cast<const TouchedUserCapsule*>(CurrentGeom);
+			PxCapsuleGeometry capsuleGeom;
+			relocateCapsule(capsuleGeom, globalPose, *TC);
+			gh.storeAny(capsuleGeom);
+		}
+		else
+		{
+			const PxRigidActor* touchedActor = CurrentGeom->mActor;
+			PX_ASSERT(touchedActor);
+
+			PxShape* touchedShape = (PxShape*)CurrentGeom->mTGUserData;
+			PX_ASSERT(touchedShape);
+
+			gh = touchedShape->getGeometry();
+			globalPose = getShapeGlobalPose(*touchedShape, *touchedActor);
+			globalPose.p -= Origin;
+		}
+
+		if (PxGeometryQuery::computePenetration(mtd, depth, volumeGeom, volumePose, gh.any(), globalPose))
+			return CurrentGeom;
+
+		PxU8* ptr = (PxU8*)Data;
+		ptr += GeomSizes[CurrentGeom->mType];
+		Data = (const PxU32*)ptr;
+	}
+	return nullptr;
+}
+
 
 static bool ParseGeomStream(const void* object, const IntArray& geom_stream)
 {
@@ -896,11 +1404,13 @@ CCTParams::CCTParams() :
 	mInvisibleWallHeight					(0.0f),
 	mMaxJumpHeight							(0.0f),
 	mMaxEdgeLength2							(0.0f),
+	mNewCollisionFricition					(1.0f),
 	mTessellation							(false),
 	mHandleSlope							(false),
 	mOverlapRecovery						(false),
 	mPreciseSweeps							(true),
-	mPreventVerticalSlidingAgainstCeiling	(false)
+	mPreventVerticalSlidingAgainstCeiling	(false),
+	mNewCollision							(false)
 {
 }
 
@@ -1178,10 +1688,13 @@ void SweepTest::findTouchedObstacles(const UserObstacles& userObstacles, const P
 			const PxExtended capMaxz = PxMax(capsules[i].p0.z, capsules[i].p1.z);
 			if((capMinz - PxExtended(r) > worldBox.maximum.z) || (worldBox.minimum.z > capMaxz + PxExtended(r))) continue;
 
+			// Bleston: Since we use cylinder vs cylinder collision for cct, the code belowe is unnecessary.
+			/*
 			// PT: more accurate capsule-box test. Not strictly necessary but worth doing if available
 			const PxReal d2 = Gu::distanceSegmentBoxSquared(toVec3(capsules[i].p0), toVec3(capsules[i].p1), toVec3(Center), Extents, PxMat33(PxIdentity));
 			if(d2>r*r)
 				continue;
+			*/
 
 			TouchedUserCapsule* UserCapsule = reinterpret_cast<TouchedUserCapsule*>(reserveContainerMemory(mGeomStream, sizeof(TouchedUserCapsule)/sizeof(PxU32)));
 			UserCapsule->mType			= TouchedGeomType::eUSER_CAPSULE;
@@ -1394,9 +1907,17 @@ bool SweepTest::doSweepTest(const InternalCBData_FindTouchedGeom* userData,
 
 		currentDirection /= Length;
 
-		// From Quake2: "if velocity is against the original velocity, stop dead to avoid tiny occilations in sloping corners"
-		if((currentDirection.dot(direction)) <= 0.0f)
-			break;
+		if (mUserParams.mNewCollision && sweepPass == SWEEP_PASS_SIDE)
+		{
+			if ((currentDirection.dot(direction)) < 0.0f)
+				break;
+		}
+		else
+		{
+			// From Quake2: "if velocity is against the original velocity, stop dead to avoid tiny occilations in sloping corners"
+			if ((currentDirection.dot(direction)) <= 0.0f)
+				break;
+		}
 
 		// From this point, we're going to update the position at least once
 		hasMoved = true;
@@ -1405,7 +1926,7 @@ bool SweepTest::doSweepTest(const InternalCBData_FindTouchedGeom* userData,
 		SweptContact C;
 		C.mDistance = Length + mUserParams.mContactOffset;
 
-		if(!CollideGeoms(this, swept_volume, mGeomStream, currentPosition, currentDirection, C, !mUserParams.mOverlapRecovery))
+		if(!CollideGeoms(this, swept_volume, mGeomStream, currentPosition, currentDirection, C, !mUserParams.mOverlapRecovery, sweepPass))
 		{
 			// no collision found => move to desired position
 			currentPosition = targetOrientation;
@@ -1418,11 +1939,11 @@ bool SweepTest::doSweepTest(const InternalCBData_FindTouchedGeom* userData,
 		{
 /*			SweptContact C;
 			C.mDistance = 10.0f;
-			CollideGeoms(this, swept_volume, mGeomStream, currentPosition, -currentDirection, C, true);
+			CollideGeoms(this, swept_volume, mGeomStream, currentPosition, -currentDirection, C, true, sweepPass);
 			currentPosition -= currentDirection*C.mDistance;
 
 			C.mDistance = 10.0f;
-			CollideGeoms(this, swept_volume, mGeomStream, currentPosition, currentDirection, C, true);
+			CollideGeoms(this, swept_volume, mGeomStream, currentPosition, currentDirection, C, true, sweepPass);
 			const float DynSkin = mUserParams.mContactOffset;
 			if(C.mDistance>DynSkin)
 				currentPosition += currentDirection*(C.mDistance-DynSkin);*/
@@ -1485,7 +2006,14 @@ bool SweepTest::doSweepTest(const InternalCBData_FindTouchedGeom* userData,
 						}
 						else
 						{
-							mTouchedPosObstacle_World = toVec3(C.mWorldPos);
+							if (swept_volume.getType() == SweptVolumeType::eOBB)
+							{
+								mTouchedPosObstacle_World = toVec3(swept_volume.mCenter) - mUserParams.mUpDirection * swept_volume.mHalfHeight;
+							}
+							else
+							{
+								mTouchedPosObstacle_World = toVec3(C.mWorldPos);
+							}
 							mTouchedPosObstacle_Local = worldToLocal(*touchedObstacle, C.mWorldPos);
 						}
 					}
@@ -1548,7 +2076,11 @@ bool SweepTest::doSweepTest(const InternalCBData_FindTouchedGeom* userData,
 				touchedActorOut = touchedActor;
 //				mTouchedPos = getShapeGlobalPose(*touchedShape).p;
 				const PxTransform shapeTransform = getShapeGlobalPose(*touchedShape, *touchedActor);
-				const PxVec3 worldPos = toVec3(C.mWorldPos);
+				PxVec3 worldPos = toVec3(C.mWorldPos);
+				if (swept_volume.getType() == SweptVolumeType::eOBB)
+				{
+					worldPos = toVec3(swept_volume.mCenter) - mUserParams.mUpDirection * swept_volume.mHalfHeight;
+				}
 				mTouchedPosShape_World = worldPos;
 				mTouchedPosShape_Local = shapeTransform.transformInv(worldPos);
 			}
@@ -1615,9 +2147,39 @@ bool SweepTest::doSweepTest(const InternalCBData_FindTouchedGeom* userData,
 			WorldNormal.normalize();
 		}
 
-		const float Bump = 0.0f;	// ### doesn't work when !=0 because of Quake2 hack!
-		const float Friction = 1.0f;
-		collisionResponse(targetOrientation, currentPosition, currentDirection, WorldNormal, Bump, Friction, (mFlags & STF_NORMALIZE_RESPONSE)!=0);
+		if (((mFlags & STF_TOUCH_OTHER_CCT) != 0) && sweepPass == SWEEP_PASS_DOWN && (!stopSliding))
+		{
+			// Stand on a controller
+			PxVec3 normalCompo, tangentCompo;
+			Ps::decomposeVector(normalCompo, tangentCompo, WorldNormal, mUserParams.mUpDirection);
+			tangentCompo.normalize();
+			if (tangentCompo.isZero())
+			{
+				tangentCompo.x = 1.0f;
+			}
+			tangentCompo += direction;
+			tangentCompo.normalize();
+			if (tangentCompo.isZero())
+			{
+				tangentCompo.x = 1.0f;
+			}
+			const float moveDist = 0.1f;
+			targetOrientation = currentPosition;
+			targetOrientation += (tangentCompo * moveDist);
+		}
+		else
+		{
+			const float Bump = 0.0f;	// ### doesn't work when !=0 because of Quake2 hack!
+			const float Friction = 1.0f;
+			if (mUserParams.mNewCollision && sweepPass == SWEEP_PASS_SIDE)
+			{
+				collisionResponse2(targetOrientation, currentPosition, currentDirection, WorldNormal, mUserParams.mUpDirection.cross(currentDirection), Bump, mUserParams.mNewCollisionFricition);
+			}
+			else
+			{
+				collisionResponse(targetOrientation, currentPosition, currentDirection, WorldNormal, Bump, Friction, (mFlags & STF_NORMALIZE_RESPONSE) != 0);
+			}
+		}
 	}
 
 	if(nb_collisions)
@@ -1625,6 +2187,99 @@ bool SweepTest::doSweepTest(const InternalCBData_FindTouchedGeom* userData,
 
 	// Final box position that should be reflected in the graphics engine
 	swept_volume.mCenter = currentPosition;
+
+	// If we didn't move, don't update the box position at all (keeping possible lazy-evaluated structures valid)
+	return hasMoved;
+}
+
+
+bool SweepTest::doRotateTest(const InternalCBData_FindTouchedGeom* userData,
+	const InternalCBData_OnHit* userHitData,
+	const UserObstacles& userObstacles,
+	SweptVolume& swept_volume,
+	PxU32* nb_collisions, PxVec3& slidingVector,
+	const PxControllerFilters& filters, SweepPass sweepPass,
+	const PxRigidActor*& touchedActorOut, const PxShape*& touchedShapeOut, PxU64 contextID)
+{
+	PX_ASSERT(swept_volume.getType() == SweptVolumeType::eOBB);
+
+	PX_PROFILE_ZONE("CharacterController.doRotateTest", contextID);
+	PX_UNUSED(contextID);
+
+	slidingVector = PxVec3(0.0f);
+
+	TouchedGeom* touchedGeom = nullptr;
+
+	// Early exit when rotation angle is zero. Since the motion is decomposed into several vectors
+	// and this function is called for each of them, it actually happens quite often.
+	if (swept_volume.mRotateAngle == 0.0f)
+		return false;
+
+	bool hasMoved = false;
+	mFlags &= ~(STF_VALIDATE_TRIANGLE_DOWN | STF_TOUCH_OTHER_CCT | STF_TOUCH_OBSTACLE);
+	touchedShapeOut = NULL;
+	touchedActorOut = NULL;
+	mTouchedObstacleHandle = INVALID_OBSTACLE_HANDLE;
+
+	PxExtendedVec3 currentPosition = swept_volume.mCenter;
+	PxF32 currentOrientation = swept_volume.mOrient;
+	PxF32 targetOrientation = swept_volume.mOrient;
+	targetOrientation = std::remainder(targetOrientation + swept_volume.mRotateAngle, PxTwoPi);
+
+	int max_iter = 1;
+
+	PxVec3 mtd(0.0f);
+	PxF32 depth = 0.0f;
+
+	PxU32 NbCollisions = 0;
+	while (max_iter--)
+	{
+		mNbIterations++;
+		// Compute current direction
+		PxF32 currentDeltaRot = targetOrientation - currentOrientation;
+
+		// Make sure the new TBV is still valid
+		{
+			// Compute temporal bounding box. We could use a capsule or an OBB instead:
+			// - the volume would be smaller
+			// - but the query would be slower
+			// Overall it's unclear whether it's worth it or not.
+			// TODO: optimize this part ?
+			PxExtendedBounds3 temporalBox;
+			swept_volume.computeTemporalBox(*this, temporalBox, currentPosition, PxVec3(0.0f));
+
+			// Gather touched geoms
+			updateTouchedGeoms(userData, userObstacles, temporalBox, filters, PxVec3(0.0f));
+		}
+
+		if (PxAbs(currentDeltaRot) < 0.0f) //Use <= to handle the case where min_dist is zero.
+			break;
+
+		// From this point, we're going to update the position at least once
+		hasMoved = true;
+
+		// Find closest collision
+		// touchedGeom = OverlapGeoms(this, swept_volume, mGeomStream, currentPosition, targetOrientation, mUserParams.mContactOffset);
+		touchedGeom = OverlapGeomsWithMTD(mtd, depth, this, swept_volume, mGeomStream, currentPosition, targetOrientation, mUserParams.mContactOffset);
+		if (nullptr == touchedGeom)
+		{
+			currentOrientation = targetOrientation;
+			break;
+		}
+
+		NbCollisions++;
+	}
+
+	if (nb_collisions)
+		*nb_collisions = NbCollisions;
+
+	swept_volume.mOrient = currentOrientation;
+
+	if (touchedGeom)
+	{
+		depth = PxMax<PxF32>(1e-4, depth);
+		slidingVector = mtd * depth;
+	}
 
 	// If we didn't move, don't update the box position at all (keeping possible lazy-evaluated structures valid)
 	return hasMoved;
@@ -1715,6 +2370,8 @@ PxControllerCollisionFlags SweepTest::moveCharacter(
 //	SideVector[upDirection] = 0.0f;
 	PxVec3 SideVector = tangent_compo;
 
+	const bool hasRotation = ((volume.getType() == SweptVolumeType::eOBB) && (PxAbs(volume.mRotateAngle) > 0.0f));
+
 	// If the side motion is zero, i.e. if the character is not really moving, disable auto-step.
 	// This is important to prevent the CCT from automatically climbing on small objects that move
 	// against it. We should climb over those only if there's a valid side motion from the player.
@@ -1725,7 +2382,7 @@ PxControllerCollisionFlags SweepTest::moveCharacter(
 //	printf("sideVectorIsZero: %d\n", sideVectorIsZero);
 
 //	if(!SideVector.isZero())
-	if(!sideVectorIsZero)
+	if(!sideVectorIsZero || hasRotation)
 //		UpVector[upDirection] += stepOffset;
 		UpVector += upDirection*stepOffset;
 //	printf("stepOffset: %f\n", stepOffset);
@@ -1792,6 +2449,30 @@ PxControllerCollisionFlags SweepTest::moveCharacter(
 		}
 	}
 
+	// ==========[ Rotate PASS ]===========================
+
+	mCachedTriIndexIndex = 0; // Rotate test do not use cached index of triangle for accelerate the query.
+	const bool PerformRotate = (volume.getType() == SweptVolumeType::eOBB);
+
+	mFlags &= ~STF_VALIDATE_TRIANGLE_SIDE;
+	if (PerformRotate)
+	{
+		NbCollisions = 0;
+		PxVec3 slidingVector(0.0f);
+		if (doRotateTest(userData, userHitData, userObstacles, volume, &NbCollisions, slidingVector, filters, SWEEP_PASS_ROTATE, touchedActor, touchedShape, contextID))
+		{
+			if (NbCollisions)
+				CollisionFlags |= PxControllerCollisionFlag::eCOLLISION_ROT;
+			PxVec3 normal_compo, tangent_compo;
+			Ps::decomposeVector(normal_compo, tangent_compo, slidingVector, upDirection);
+			SideVector += tangent_compo;
+		}
+	}
+	else
+	{
+		volume.mOrient = std::remainder(volume.mOrient + volume.mRotateAngle, PxTwoPi);
+	}
+
 	// ==========[ SIDE PASS ]===========================
 
 	mCachedTriIndexIndex = 1;
@@ -1839,7 +2520,7 @@ PxControllerCollisionFlags SweepTest::moveCharacter(
 		NbCollisions=0;
 
 //		if(!SideVector.isZero())	// We disabled that before so we don't have to undo it in that case
-		if(!sideVectorIsZero)		// We disabled that before so we don't have to undo it in that case
+		if(!sideVectorIsZero || hasRotation)		// We disabled that before so we don't have to undo it in that case
 //			DownVector[upDirection] -= stepOffset;	// Undo our artificial up motion
 			DownVector -= upDirection*stepOffset;	// Undo our artificial up motion
 
@@ -1963,6 +2644,7 @@ PxControllerCollisionFlags SweepTest::moveCharacter(
 #include "CctInternalStructs.h"
 #include "CctBoxController.h"
 #include "CctCapsuleController.h"
+#include "CctRotatableController.h"
 #include "CctCharacterControllerManager.h"
 #include "PxActor.h"
 #include "PxScene.h"
@@ -2100,6 +2782,38 @@ void Controller::findTouchedObject(const PxControllerFilters& filters, const PxO
 	}
 }
 
+static void getEularAngles(const physx::PxQuat& rot, float& pitch, float& yaw, float& roll)
+{
+	float sqx = rot.x * rot.x;
+	float sqy = rot.y * rot.y;
+	float sqz = rot.z * rot.z;
+	float sqw = rot.w * rot.w;
+
+	// If quaternion is normalized the unit is one, otherwise it is the correction factor
+	float unit = sqx + sqy + sqz + sqw;
+	float test = rot.w * rot.x - rot.y * rot.z;
+	if (test > 0.4999f * unit)								//  0.4999f OR  0.5f - EPSILON
+	{
+		// Singularity at north pole
+		yaw = 2 * (float)std::atan2(rot.y, rot.w);			// Yaw
+		pitch = physx::PxHalfPi;							// Pitch
+		roll = 0;											// Roll
+	}
+	else if (test < -0.4999f * unit)						// -0.4999f OR -0.5f + EPSILON
+	{
+		// Singularity at south pole
+		yaw = 2 * (float)std::atan2(rot.y, rot.w);			// Yaw
+		pitch = -physx::PxHalfPi;							// Pitch
+		roll = 0;											// Roll
+	}
+	else
+	{
+		yaw = std::atan2(2 * (rot.x * rot.z + rot.w * rot.y), sqz + sqw - sqx - sqy);	// Yaw
+		pitch = std::asin(2 * test / unit);												// Pitch
+		roll = std::atan2(2 * (rot.x * rot.y + rot.w * rot.z), sqy + sqw - sqx - sqz);	// Roll
+	}
+}
+
 bool Controller::rideOnTouchedObject(SweptVolume& volume, const PxVec3& upDirection, PxVec3& disp, const PxObstacleContext* obstacleContext)
 {
 	PX_ASSERT(mCctModule.mTouchedShape || (mCctModule.mTouchedObstacleHandle != INVALID_OBSTACLE_HANDLE));
@@ -2109,6 +2823,7 @@ bool Controller::rideOnTouchedObject(SweptVolume& volume, const PxVec3& upDirect
 	bool canDoUpdate = true;	// Always true on obstacles
 	PxU32 behaviorFlags = 0;	// Default on shapes
 	PxVec3 delta(0);
+	PxF32 deltaOrient{ 0.0f };
 	float timeCoeff = 1.0f;
 
 	if(mCctModule.mTouchedShape)
@@ -2138,7 +2853,21 @@ bool Controller::rideOnTouchedObject(SweptVolume& volume, const PxVec3& upDirect
 				const PxTransform shapeTransform = getShapeGlobalPose(*mCctModule.mTouchedShape.get(), rigidActor);
 				const PxVec3 posPreviousFrame = mCctModule.mTouchedPosShape_World;
 				const PxVec3 posCurrentFrame = shapeTransform.transform(mCctModule.mTouchedPosShape_Local);
+
 				delta = posCurrentFrame - posPreviousFrame;
+				if (rigidActor.getConcreteType() == PxConcreteType::eRIGID_DYNAMIC)
+				{
+					const PxRigidDynamic& dynamicRigid = static_cast<const PxRigidDynamic&>(rigidActor);
+					auto angvel = dynamicRigid.getAngularVelocity();
+					float angSpeed = angvel.normalize();
+					if (angSpeed > 0.0f)
+					{
+						PxQuat angVelQ(angSpeed/timeCoeff, angvel);
+						float pitch, yaw, roll;
+						getEularAngles(angVelQ, pitch, yaw, roll);
+						deltaOrient = yaw;
+					}
+				}
 			}
 		}
 	}
@@ -2200,7 +2929,9 @@ bool Controller::rideOnTouchedObject(SweptVolume& volume, const PxVec3& upDirect
 				disp += deltaSideDisp;
 		}
 //		printf("delta in: %f %f %f (%f)\n", delta.x, delta.y, delta.z, 1.0f/timeCoeff);
+		volume.mRotateAngle += deltaOrient;
 		mDeltaXP = delta * timeCoeff;
+		mDeltaOrient = deltaOrient;
 	}
 	else
 	{
@@ -2237,7 +2968,11 @@ PxControllerCollisionFlags Controller::move(SweptVolume& volume, const PxVec3& o
 
 	///////////
 
-	PxVec3 disp = originalDisp + mOverlapRecover;
+	PxVec3 disp = originalDisp;
+	if (!Ps::isAlmostZero(mOverlapRecover))
+	{
+		disp = mOverlapRecover;
+	}
 	mOverlapRecover = PxVec3(0.0f);
 
 	bool standingOnMoving = false;	// PT: whether the CCT is currently standing on a moving object
@@ -2305,6 +3040,7 @@ PxControllerCollisionFlags Controller::move(SweptVolume& volume, const PxVec3& o
 	{
 		mCachedStandingOnMoving = false;
 		mDeltaXP = PxVec3(0.0f);
+		mDeltaOrient = 0.0f;
 	}
 //	printf("standingOnMoving: %d\n", standingOnMoving);
 
@@ -2371,6 +3107,27 @@ PxControllerCollisionFlags Controller::move(SweptVolume& volume, const PxVec3& o
 
 					const size_t code = encodeUserObject(i, USER_OBJECT_CCT);
 					capsuleUserData.pushBack(reinterpret_cast<const void*>(code));
+				}
+				else if (currentController->mType == PxControllerShapeType::eROTATABLE)
+				{
+					RotatableController* RC = static_cast<RotatableController*>(currentController);
+					if (RC->getShapeType() == PxRotatableShapeType::eOBB)
+					{
+						PxExtendedBox obb;
+						RC->getOBB(obb);
+						boxes.pushBack(obb);
+						const size_t code = encodeUserObject(i, USER_OBJECT_CCT);
+						boxUserData.pushBack((const void*)code);
+					}
+					else if (RC->getShapeType() == PxRotatableShapeType::eCapsule)
+					{
+						PxExtendedCapsule worldCapule;
+						RC->getCapsule(worldCapule);
+						capsules.pushBack(worldCapule);
+						const size_t code = encodeUserObject(i, USER_OBJECT_CCT);
+						capsuleUserData.pushBack((const void*)code);
+					}
+					else PX_ASSERT(0);
 				}
 				else PX_ASSERT(0);
 			}
@@ -2468,6 +3225,7 @@ PxControllerCollisionFlags Controller::move(SweptVolume& volume, const PxVec3& o
 	const PxRigidActor* touchedActor = NULL;
 	const PxShape* touchedShape = NULL;
 	PxExtendedVec3 Backup = volume.mCenter;
+	PxF32 BackupOrient = volume.mOrient;
 	collisionFlags = mCctModule.moveCharacter(&findGeomData, &userHitData, volume, disp, userObstacles, minDist, filters, constrainedClimbingMode, standingOnMoving, touchedActor, touchedShape, getContextId());
 
 	if(mCctModule.mFlags & STF_HIT_NON_WALKABLE)
@@ -2475,6 +3233,7 @@ PxControllerCollisionFlags Controller::move(SweptVolume& volume, const PxVec3& o
 		// A bit slow, but everything else I tried was less convincing...
 		mCctModule.mFlags |= STF_WALK_EXPERIMENT;
 		volume.mCenter = Backup;
+		volume.mOrient = BackupOrient;
 
 		PxVec3 xpDisp;
 		if(mUserParams.mNonWalkableMode==PxControllerNonWalkableMode::ePREVENT_CLIMBING_AND_FORCE_SLIDING)
@@ -2501,11 +3260,19 @@ PxControllerCollisionFlags Controller::move(SweptVolume& volume, const PxVec3& o
 	{
 		const PxVec3 delta = Backup - volume.mCenter;
 		const PxF32 deltaM2 = delta.magnitudeSquared();
-		if(deltaM2!=0.0f)
+		const PxF32 deltaAngle = PxAbs(volume.mOrient - BackupOrient);
+		if (deltaM2 != 0.0f || ((deltaAngle != 0.0f) && (volume.getType() == SweptVolumeType::eOBB)))
 		{
 			PxTransform targetPose = mKineActor->getGlobalPose();
 			targetPose.p = toVec3(mPosition);
-			targetPose.q = mUserParams.mQuatFromUp;
+			if (volume.getType() == SweptVolumeType::eOBB)
+			{
+				targetPose.q = GetRotateQuat(volume.mOrient, mUserParams.mUpDirection, mUserParams.mQuatFromUp);
+			}
+			else
+			{
+				targetPose.q = mUserParams.mQuatFromUp;
+			}
 			mKineActor->setKinematicTarget(targetPose);
 		}
 	}
@@ -2533,6 +3300,11 @@ PxControllerCollisionFlags BoxController::move(const PxVec3& disp, PxF32 minDist
 	return Controller::move(sweptBox, disp, minDist, elapsedTime, filters, obstacles, false);
 }
 
+PxControllerCollisionFlags BoxController::moveWithRotate(const PxVec3& disp, PxF32 minDist, PxF32 rotAngle, PxF32 elapsedTime, const PxControllerFilters& filters, const PxObstacleContext* obstacles)
+{
+	return BoxController::move(disp, minDist, elapsedTime, filters, obstacles);
+}
+
 PxControllerCollisionFlags CapsuleController::move(const PxVec3& disp, PxF32 minDist, PxF32 elapsedTime, const PxControllerFilters& filters, const PxObstacleContext* obstacles)
 {
 	PX_PROFILE_ZONE("CharacterController.move", getContextId());
@@ -2548,3 +3320,55 @@ PxControllerCollisionFlags CapsuleController::move(const PxVec3& disp, PxF32 min
 	return Controller::move(sweptCapsule, disp, minDist, elapsedTime, filters, obstacles, mClimbingMode==PxCapsuleClimbingMode::eCONSTRAINED);
 }
 
+
+PxControllerCollisionFlags CapsuleController::moveWithRotate(const PxVec3& disp, PxF32 minDist, PxF32 rotAngle, PxF32 elapsedTime, const PxControllerFilters& filters, const PxObstacleContext* obstacles)
+{
+	return CapsuleController::move(disp, minDist, elapsedTime, filters, obstacles);
+}
+
+PxControllerCollisionFlags RotatableController::move(const PxVec3& disp, PxF32 minDist, PxF32 elapsedTime, const PxControllerFilters& filters, const PxObstacleContext* obstacles)
+{
+	return RotatableController::moveWithRotate(disp, minDist, 0.0f, elapsedTime, filters, obstacles);
+}
+
+PxControllerCollisionFlags RotatableController::moveWithRotate(const PxVec3& disp, PxF32 minDist, PxF32 rotAngle, PxF32 elapsedTime, const PxControllerFilters& filters, const PxObstacleContext* obstacles)
+{
+	PX_SIMD_GUARD;
+
+	PxControllerCollisionFlags ret = PxControllerCollisionFlags(0);
+	switch (mShapeType)
+	{
+		case PxRotatableShapeType::eOBB:
+			{
+				SweptOBB sweptOBB;
+				sweptOBB.mCenter = mPosition;
+				sweptOBB.mExtents = PxVec3(mHalfBoxHeight, mHalfSideExtent, mHalfForwardExtent);
+				sweptOBB.mHalfHeight = mHalfBoxHeight;	// UBI
+				sweptOBB.mOrient = mOrientation;
+				sweptOBB.mRotateAngle = rotAngle;
+				ret = Controller::move(sweptOBB, disp, minDist, elapsedTime, filters, obstacles, mClimbingMode == PxCapsuleClimbingMode::eCONSTRAINED);
+				mOrientation = sweptOBB.mOrient;
+				return ret;
+			}
+			break;
+		case PxRotatableShapeType::eCapsule:
+			{
+				SweptCapsule sweptCapsule;
+				sweptCapsule.mCenter = mPosition;
+				sweptCapsule.mRadius = mRadius;
+				sweptCapsule.mHeight = mHeight;
+				sweptCapsule.mHalfHeight = mHeight * 0.5f + mRadius;	// UBI
+				sweptCapsule.mOrient = mOrientation;
+				sweptCapsule.mRotateAngle = rotAngle;
+				ret = Controller::move(sweptCapsule, disp, minDist, elapsedTime, filters, obstacles, mClimbingMode == PxCapsuleClimbingMode::eCONSTRAINED);
+				mOrientation = sweptCapsule.mOrient;
+				return ret;
+			}
+			break;
+		default:
+			PX_ASSERT(false);
+			break;
+	}
+	PX_ASSERT(false);
+	return PxControllerCollisionFlags(0);
+}

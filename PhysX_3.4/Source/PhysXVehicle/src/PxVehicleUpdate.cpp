@@ -80,12 +80,17 @@ PxVec3 gForwardDefault(0,0,1.f);
 PxVec3 gRight;
 PxVec3 gUp;
 PxVec3 gForward;
+bool gIsLeftFrame = true;
 
-void PxVehicleSetBasisVectors(const PxVec3& up, const PxVec3& forward)
+void PxVehicleSetBasisVectors(const PxVec3& up, const PxVec3& forward, bool isLeftFrame)
 {
-	gRight=up.cross(forward);
-	gUp=up;
-	gForward=forward;
+	gIsLeftFrame = isLeftFrame;
+	if (gIsLeftFrame)
+		gRight = up.cross(forward);
+	else
+		gRight = forward.cross(up);
+	gUp = up;
+	gForward = forward;
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -1795,8 +1800,16 @@ PX_FORCE_INLINE void computeAckermannSteerAngles
 	const PxF32 dx=width + dz/PxTan(rightSteerAngle);
 	const PxF32 leftSteerAnglePerfect=PxAtan(dz/dx);
 	const PxF32 leftSteerAngle=rightSteerAngle + ackermannAccuracy*(leftSteerAnglePerfect-rightSteerAngle);
-	*rightAckermannSteerAngle=physx::intrinsics::fsel(steerAngle, rightSteerAngle, -leftSteerAngle);
-	*leftAckermannSteerAngle=physx::intrinsics::fsel(steerAngle, leftSteerAngle, -rightSteerAngle);
+	if (gIsLeftFrame)
+	{
+		*rightAckermannSteerAngle = physx::intrinsics::fsel(steerAngle, rightSteerAngle, -leftSteerAngle);
+		*leftAckermannSteerAngle = physx::intrinsics::fsel(steerAngle, leftSteerAngle, -rightSteerAngle);
+	}
+	else
+	{
+		*rightAckermannSteerAngle = physx::intrinsics::fsel(steerAngle, leftSteerAngle, -rightSteerAngle);
+		*leftAckermannSteerAngle = physx::intrinsics::fsel(steerAngle, rightSteerAngle, -leftSteerAngle);
+	}
 }
 
 PX_FORCE_INLINE void computeAckermannCorrectedSteerAngles
@@ -1973,17 +1986,17 @@ PX_FORCE_INLINE void computeTireDirs(const PxVec3& chassisLatDir, const PxVec3& 
 	PX_ASSERT(hitNorm.magnitude()>0.999f && hitNorm.magnitude()<1.001f);
 
 	//Compute the tire axes in the ground plane.
-	PxVec3 tzRaw=chassisLatDir.cross(hitNorm);
-	PxVec3 txRaw=hitNorm.cross(tzRaw);
+	PxVec3 tzRaw = gIsLeftFrame ? chassisLatDir.cross(hitNorm) : hitNorm.cross(chassisLatDir);
+	PxVec3 txRaw = gIsLeftFrame ? hitNorm.cross(tzRaw) : tzRaw.cross(hitNorm);
 	tzRaw.normalize();
 	txRaw.normalize();
 	//Rotate the tire using the steer angle.
-	const PxF32 cosWheelSteer=PxCos(wheelSteerAngle);
-	const PxF32 sinWheelSteer=PxSin(wheelSteerAngle);
-	const PxVec3 tz=tzRaw*cosWheelSteer + txRaw*sinWheelSteer;
-	const PxVec3 tx=txRaw*cosWheelSteer - tzRaw*sinWheelSteer;
-	tireLongDir=tz;
-	tireLatDir=tx;
+	const PxF32 cosWheelSteer = PxCos(wheelSteerAngle);
+	const PxF32 sinWheelSteer = PxSin(wheelSteerAngle);
+	const PxVec3 tz = gIsLeftFrame ? tzRaw * cosWheelSteer + txRaw * sinWheelSteer : tzRaw * cosWheelSteer - txRaw * sinWheelSteer;
+	const PxVec3 tx = gIsLeftFrame ? txRaw * cosWheelSteer - tzRaw * sinWheelSteer : txRaw * cosWheelSteer + tzRaw * sinWheelSteer;
+	tireLongDir = tz;
+	tireLatDir = tx;
 }
 
 PX_FORCE_INLINE void computeTireSlips
@@ -2715,6 +2728,8 @@ public:
 	//Lateral slip.
 	PxF32 latSlips[4];
 
+	PxVec3 tireForces[4];
+
 	//Forward speed of rigid body along tire longitudinal direction at tire base.
 	//Used later to blend the integrated wheel rotation angle between rolling speed and computed speed
 	//when the wheel rotation speeds become unreliable at low forward speeds.
@@ -2928,6 +2943,7 @@ void processSuspTireWheels
 	PxVec3* tireLateralDirs=outputData.tireLateralDirs;
 	PxF32* longSlips=outputData.longSlips;
 	PxF32* latSlips=outputData.latSlips;
+	PxVec3* tireForces=outputData.tireForces;
 	//Now unpack the forward speeds that are used later to blend the integrated wheel 
 	//rotation angle between rolling speed and computed speed when the wheel rotation 
 	//speeds become unreliable at low forward speeds.
@@ -2966,6 +2982,9 @@ void processSuspTireWheels
 	PxRigidDynamic** hitActors=outputData.hitActors;
 	PxVec3* hitActorForces=outputData.hitActorForces;
 	PxVec3* hitActorForcePositions=outputData.hitActorForcePositions;
+
+	//Set the cmass rotation straight away (we might need this, we might not but we don't know that yet so just set it).
+	outputData.vehConstraintData.mCMassRotation = constData.vehActor->getCMassLocalPose().q;
 
 	//Compute all the hit data (counts, distances, planes, frictions, actors, shapes, materials etc etc).
 	//If we just did a raycast/sweep then we need to compute all this from the hit reports.
@@ -3517,6 +3536,7 @@ void processSuspTireWheels
 					//Add all the forces/torques together.
 					chassisForce+=tireForce;
 					chassisTorque+=tireTorque;
+					tireForces[i] = tireForce;
 
 					//Graph all the data we just computed.
 #if PX_DEBUG_VEHICLE_ON
@@ -4495,41 +4515,42 @@ void integrateNoDriveWheelRotationAngles
 
 void computeWheelLocalPoses
 (const PxVehicleWheels4SimData& wheelsSimData,
- const PxVehicleWheels4DynData& wheelsDynData, 
- const PxWheelQueryResult* wheelQueryResults,
- const PxU32 numWheelsToPose,
- const PxTransform& vehChassisCMLocalPose,
- PxTransform* localPoses)
+	const PxVehicleWheels4DynData& wheelsDynData,
+	const PxWheelQueryResult* wheelQueryResults,
+	const PxU32 numWheelsToPose,
+	const PxTransform& vehChassisCMLocalPose,
+	PxTransform* localPoses,
+	PxReal* camberAngles)
 {
-	const PxF32* PX_RESTRICT rotAngles=wheelsDynData.mWheelRotationAngles;
+	const PxF32* PX_RESTRICT rotAngles = wheelsDynData.mWheelRotationAngles;
 
-	const PxVec3 cmOffset=vehChassisCMLocalPose.p;
+	const PxVec3 cmOffset = vehChassisCMLocalPose.p;
 
-	const PxVec3 forward = gRight.cross(gUp);
+	const PxVec3 forward = gForward;
 
-	for(PxU32 i=0;i<numWheelsToPose;i++)
+	for (PxU32 i = 0; i<numWheelsToPose; i++)
 	{
-		const PxF32 jounce=wheelQueryResults[i].suspJounce;
+		const PxF32 jounce = wheelQueryResults[i].suspJounce;
 
 		//Compute the camber angle.
-		const PxVehicleSuspensionData& suspData=wheelsSimData.getSuspensionData(i);
-		PxF32 camberAngle=suspData.mCamberAtRest;
-		if(jounce > 0.0f)
+		const PxVehicleSuspensionData& suspData = wheelsSimData.getSuspensionData(i);
+		camberAngles[i] = suspData.mCamberAtRest;
+		if (jounce > 0.0f)
 		{
-			camberAngle += jounce*suspData.mCamberAtMaxCompression*suspData.getRecipMaxCompression();
+			camberAngles[i] += jounce * suspData.mCamberAtMaxCompression*suspData.getRecipMaxCompression();
 		}
 		else
 		{
-			camberAngle -= jounce*suspData.mCamberAtMaxDroop*suspData.getRecipMaxDroop();
+			camberAngles[i] -= jounce * suspData.mCamberAtMaxDroop*suspData.getRecipMaxDroop();
 		}
 
 		//Compute the transform of the wheel shapes. 
-		const PxVec3 pos=cmOffset+wheelsSimData.getWheelCentreOffset(i)-wheelsSimData.getSuspTravelDirection(i)*jounce;
+		const PxVec3 pos = cmOffset + wheelsSimData.getWheelCentreOffset(i) - wheelsSimData.getSuspTravelDirection(i)*jounce;
 		const PxQuat quat(wheelQueryResults[i].steerAngle, gUp);
-		const PxQuat quat2(camberAngle, quat.rotate(forward));
-		const PxQuat quat3=quat2*quat;
-		const PxQuat quat4(rotAngles[i],quat3.rotate(gRight));
-		const PxTransform t(pos,quat4*quat3);
+		const PxQuat quat2(camberAngles[i], quat.rotate(forward));
+		const PxQuat quat3 = quat2 * quat;
+		const PxQuat quat4(gIsLeftFrame ? rotAngles[i] : -rotAngles[i], quat3.rotate(gRight));
+		const PxTransform t(pos, quat4*quat3);
 		localPoses[i] = t;
 	}
 }
@@ -4756,6 +4777,7 @@ public:
 			wheelQueryResults[i].suspSpringForce=outputData.suspensionSpringForces[i];
 			wheelQueryResults[i].tireLongitudinalDir=outputData.tireLongitudinalDirs[i];
 			wheelQueryResults[i].tireLateralDir=outputData.tireLateralDirs[i];
+			wheelQueryResults[i].tireForce=outputData.tireForces[i];
 			wheelQueryResults[i].longitudinalSlip=outputData.longSlips[i];
 			wheelQueryResults[i].lateralSlip=outputData.latSlips[i];
 			wheelQueryResults[i].steerAngle=steerAngles[i];
@@ -4945,6 +4967,7 @@ PxVehicleDrive4W* vehDrive4W, PxVehicleWheelQueryResult* vehWheelQueryResults, P
 	PxVec3 carChassisAngVel;
 	{
 		carChassisCMLocalPose = vehActor->getCMassLocalPose();
+		carChassisCMLocalPose.q = PxQuat(PxIdentity);
 		origCarChassisTransform = vehActor->getGlobalPose().transform(carChassisCMLocalPose);
 		carChassisTransform = origCarChassisTransform;
 		const PxF32 chassisMass = vehActor->getMass();
@@ -5020,7 +5043,7 @@ PxVehicleDrive4W* vehDrive4W, PxVehicleWheelQueryResult* vehWheelQueryResults, P
 	bool isIntentionToAccelerate;
 	{
 		getVehicle4WControlValues(driveDynData,accel,brake,handbrake,steerLeft,steerRight);
-		steer=steerRight-steerLeft;
+		steer = gIsLeftFrame ? steerRight - steerLeft : steerLeft - steerRight;
 		accel=autoboxCompensatedAnalogAccel;
 		isIntentionToAccelerate = (accel>0.0f && 0.0f==brake && 0.0f==handbrake && PxVehicleGearsData::eNEUTRAL != currentGear);
 #if PX_DEBUG_VEHICLE_ON
@@ -5313,12 +5336,17 @@ PxVehicleDrive4W* vehDrive4W, PxVehicleWheelQueryResult* vehWheelQueryResults, P
 
 	//Compute and pose the wheels from jounces, rotations angles, and steer angles.
 	PxTransform localPoses0[4] = {PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity)};
-	computeWheelLocalPoses(wheels4SimDatas[0],wheels4DynDatas[0],&wheelQueryResults[4*0],numActiveWheelsPerBlock4[0],carChassisCMLocalPose,localPoses0);
+	PxReal cambers0[4] = { 0,0,0,0 };
+	computeWheelLocalPoses(wheels4SimDatas[0],wheels4DynDatas[0],&wheelQueryResults[4*0],numActiveWheelsPerBlock4[0],carChassisCMLocalPose,localPoses0,cambers0);
 	//Copy the poses to the wheelQueryResults
 	wheelQueryResults[4*0 + 0].localPose = localPoses0[0];
 	wheelQueryResults[4*0 + 1].localPose = localPoses0[1];
 	wheelQueryResults[4*0 + 2].localPose = localPoses0[2];
 	wheelQueryResults[4*0 + 3].localPose = localPoses0[3];
+	wheelQueryResults[4*0 + 0].camberAngle = cambers0[0];
+	wheelQueryResults[4*0 + 1].camberAngle = cambers0[1];
+	wheelQueryResults[4*0 + 2].camberAngle = cambers0[2];
+	wheelQueryResults[4*0 + 3].camberAngle = cambers0[3];
 	//Copy the poses to the concurrent update data.
 	vehicleConcurrentUpdates.concurrentWheelUpdates[4*0 + 0].localPose = localPoses0[0];
 	vehicleConcurrentUpdates.concurrentWheelUpdates[4*0 + 1].localPose = localPoses0[1];
@@ -5327,12 +5355,17 @@ PxVehicleDrive4W* vehDrive4W, PxVehicleWheelQueryResult* vehWheelQueryResults, P
 	for(PxU32 i=1;i<numWheels4;i++)
 	{
 		PxTransform localPoses[4] = {PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity)};
-		computeWheelLocalPoses(wheels4SimDatas[i],wheels4DynDatas[i],&wheelQueryResults[4*i],numActiveWheelsPerBlock4[i],carChassisCMLocalPose,localPoses);
+		PxReal cambers[4] = { 0,0,0,0 };
+		computeWheelLocalPoses(wheels4SimDatas[i],wheels4DynDatas[i],&wheelQueryResults[4*i],numActiveWheelsPerBlock4[i],carChassisCMLocalPose,localPoses,cambers);
 		//Copy the poses to the wheelQueryResults
 		wheelQueryResults[4*i + 0].localPose = localPoses[0];
 		wheelQueryResults[4*i + 1].localPose = localPoses[1];
 		wheelQueryResults[4*i + 2].localPose = localPoses[2];
 		wheelQueryResults[4*i + 3].localPose = localPoses[3];
+		wheelQueryResults[4*i + 0].camberAngle = cambers[0];
+		wheelQueryResults[4*i + 1].camberAngle = cambers[1];
+		wheelQueryResults[4*i + 2].camberAngle = cambers[2];
+		wheelQueryResults[4*i + 3].camberAngle = cambers[3];
 		//Copy the poses to the concurrent update data.
 		vehicleConcurrentUpdates.concurrentWheelUpdates[4*i + 0].localPose = localPoses[0];
 		vehicleConcurrentUpdates.concurrentWheelUpdates[4*i + 1].localPose = localPoses[1];
@@ -5527,6 +5560,7 @@ void PxVehicleUpdate::updateDriveNW
 	PxVec3 carChassisAngVel;
 	{
 		carChassisCMLocalPose = vehActor->getCMassLocalPose();
+		carChassisCMLocalPose.q = PxQuat(PxIdentity);
 		origCarChassisTransform = vehActor->getGlobalPose().transform(carChassisCMLocalPose);
 		carChassisTransform = origCarChassisTransform;
 		const PxF32 chassisMass = vehActor->getMass();
@@ -5602,7 +5636,7 @@ void PxVehicleUpdate::updateDriveNW
 	bool isIntentionToAccelerate;
 	{
 		getVehicleNWControlValues(driveDynData,accel,brake,handbrake,steerLeft,steerRight);
-		steer=steerRight-steerLeft;
+		steer = gIsLeftFrame ? steerRight - steerLeft : steerLeft - steerRight;
 		accel=autoboxCompensatedAnalogAccel;
 		isIntentionToAccelerate = (accel>0.0f && 0.0f==brake && 0.0f==handbrake && PxVehicleGearsData::eNEUTRAL != currentGear);
 #if PX_DEBUG_VEHICLE_ON
@@ -5834,11 +5868,16 @@ void PxVehicleUpdate::updateDriveNW
 
 	//Pose the wheels from jounces, rotations angles, and steer angles.
 	PxTransform localPoses0[4] = {PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity)};
-	computeWheelLocalPoses(wheels4SimDatas[0],wheels4DynDatas[0],&wheelQueryResults[4*0],numActiveWheelsPerBlock4[0],carChassisCMLocalPose,localPoses0);
+	PxReal cambers0[4] = { 0,0,0,0 };
+	computeWheelLocalPoses(wheels4SimDatas[0],wheels4DynDatas[0],&wheelQueryResults[4*0],numActiveWheelsPerBlock4[0],carChassisCMLocalPose,localPoses0, cambers0);
 	wheelQueryResults[4*0 + 0].localPose = localPoses0[0];
 	wheelQueryResults[4*0 + 1].localPose = localPoses0[1];
 	wheelQueryResults[4*0 + 2].localPose = localPoses0[2];
 	wheelQueryResults[4*0 + 3].localPose = localPoses0[3];
+	wheelQueryResults[4*0 + 0].camberAngle = cambers0[0];
+	wheelQueryResults[4*0 + 1].camberAngle = cambers0[1];
+	wheelQueryResults[4*0 + 2].camberAngle = cambers0[2];
+	wheelQueryResults[4*0 + 3].camberAngle = cambers0[3];
 	vehicleConcurrentUpdates.concurrentWheelUpdates[4*0 + 0].localPose = localPoses0[0];
 	vehicleConcurrentUpdates.concurrentWheelUpdates[4*0 + 1].localPose = localPoses0[1];
 	vehicleConcurrentUpdates.concurrentWheelUpdates[4*0 + 2].localPose = localPoses0[2];
@@ -5846,11 +5885,16 @@ void PxVehicleUpdate::updateDriveNW
 	for(PxU32 i=1;i<numWheels4;i++)
 	{
 		PxTransform localPoses[4] = {PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity)};
-		computeWheelLocalPoses(wheels4SimDatas[i],wheels4DynDatas[i],&wheelQueryResults[4*i],numActiveWheelsPerBlock4[i],carChassisCMLocalPose,localPoses);
+		PxReal cambers[4] = { 0,0,0,0 };
+		computeWheelLocalPoses(wheels4SimDatas[i],wheels4DynDatas[i],&wheelQueryResults[4*i],numActiveWheelsPerBlock4[i],carChassisCMLocalPose,localPoses, cambers);
 		wheelQueryResults[4*i + 0].localPose = localPoses[0];
 		wheelQueryResults[4*i + 1].localPose = localPoses[1];
 		wheelQueryResults[4*i + 2].localPose = localPoses[2];
 		wheelQueryResults[4*i + 3].localPose = localPoses[3];
+		wheelQueryResults[4*i + 0].camberAngle = cambers[0];
+		wheelQueryResults[4*i + 1].camberAngle = cambers[1];
+		wheelQueryResults[4*i + 2].camberAngle = cambers[2];
+		wheelQueryResults[4*i + 3].camberAngle = cambers[3];
 		vehicleConcurrentUpdates.concurrentWheelUpdates[4*i + 0].localPose = localPoses[0];
 		vehicleConcurrentUpdates.concurrentWheelUpdates[4*i + 1].localPose = localPoses[1];
 		vehicleConcurrentUpdates.concurrentWheelUpdates[4*i + 2].localPose = localPoses[2];
@@ -6059,7 +6103,8 @@ void PxVehicleUpdate::updateTank
 	PxVec3 carChassisAngVel;
 	{
 		carChassisCMLocalPose = vehActor->getCMassLocalPose();
-		origCarChassisTransform = vehActor->getGlobalPose().transform(vehActor->getCMassLocalPose());
+		carChassisCMLocalPose.q = PxQuat(PxIdentity);
+		origCarChassisTransform = vehActor->getGlobalPose().transform(carChassisCMLocalPose);
 		carChassisTransform = origCarChassisTransform;
 		const PxF32 chassisMass = vehActor->getMass();
 		inverseChassisMass = 1.0f/chassisMass;
@@ -6339,11 +6384,16 @@ void PxVehicleUpdate::updateTank
 
 	//Pose the wheels from jounces, rotations angles, and steer angles.
 	PxTransform localPoses0[4] = {PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity)};
-	computeWheelLocalPoses(wheels4SimDatas[0],wheels4DynDatas[0],&wheelQueryResults[4*0],numActiveWheelsPerBlock4[0],carChassisCMLocalPose,localPoses0);
+	PxReal cambers0[4] = { 0,0,0,0 };
+	computeWheelLocalPoses(wheels4SimDatas[0],wheels4DynDatas[0],&wheelQueryResults[4*0],numActiveWheelsPerBlock4[0],carChassisCMLocalPose,localPoses0, cambers0);
 	wheelQueryResults[4*0 + 0].localPose = localPoses0[0];
 	wheelQueryResults[4*0 + 1].localPose = localPoses0[1];
 	wheelQueryResults[4*0 + 2].localPose = localPoses0[2];
 	wheelQueryResults[4*0 + 3].localPose = localPoses0[3];
+	wheelQueryResults[4*0 + 0].camberAngle = cambers0[0];
+	wheelQueryResults[4*0 + 1].camberAngle = cambers0[1];
+	wheelQueryResults[4*0 + 2].camberAngle = cambers0[2];
+	wheelQueryResults[4*0 + 3].camberAngle = cambers0[3];
 	vehicleConcurrentUpdates.concurrentWheelUpdates[4*0 + 0].localPose = localPoses0[0];
 	vehicleConcurrentUpdates.concurrentWheelUpdates[4*0 + 1].localPose = localPoses0[1];
 	vehicleConcurrentUpdates.concurrentWheelUpdates[4*0 + 2].localPose = localPoses0[2];
@@ -6351,11 +6401,16 @@ void PxVehicleUpdate::updateTank
 	for(PxU32 i=1;i<numWheels4;i++)
 	{
 		PxTransform localPoses[4] = {PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity)};
-		computeWheelLocalPoses(wheels4SimDatas[i],wheels4DynDatas[i],&wheelQueryResults[4*i],numActiveWheelsPerBlock4[i],carChassisCMLocalPose,localPoses);
+		PxReal cambers[4] = { 0,0,0,0 };
+		computeWheelLocalPoses(wheels4SimDatas[i],wheels4DynDatas[i],&wheelQueryResults[4*i],numActiveWheelsPerBlock4[i],carChassisCMLocalPose,localPoses, cambers);
 		wheelQueryResults[4*i + 0].localPose = localPoses[0];
 		wheelQueryResults[4*i + 1].localPose = localPoses[1];
 		wheelQueryResults[4*i + 2].localPose = localPoses[2];
 		wheelQueryResults[4*i + 3].localPose = localPoses[3];
+		wheelQueryResults[4*i + 0].camberAngle = cambers[0];
+		wheelQueryResults[4*i + 1].camberAngle = cambers[1];
+		wheelQueryResults[4*i + 2].camberAngle = cambers[2];
+		wheelQueryResults[4*i + 3].camberAngle = cambers[3];
 		vehicleConcurrentUpdates.concurrentWheelUpdates[4*i + 0].localPose = localPoses[0];
 		vehicleConcurrentUpdates.concurrentWheelUpdates[4*i + 1].localPose = localPoses[1];
 		vehicleConcurrentUpdates.concurrentWheelUpdates[4*i + 2].localPose = localPoses[2];
@@ -6515,6 +6570,7 @@ void PxVehicleUpdate::updateNoDrive
 	PxVec3 carChassisAngVel;
 	{
 		carChassisCMLocalPose = vehActor->getCMassLocalPose();
+		carChassisCMLocalPose.q = PxQuat(PxIdentity);
 		origCarChassisTransform = vehActor->getGlobalPose().transform(carChassisCMLocalPose);
 		carChassisTransform = origCarChassisTransform;
 		const PxF32 chassisMass = vehActor->getMass();
@@ -6678,11 +6734,16 @@ void PxVehicleUpdate::updateNoDrive
 
 	//Pose the wheels from jounces, rotations angles, and steer angles.
 	PxTransform localPoses0[4] = {PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity)};
-	computeWheelLocalPoses(wheels4SimDatas[0],wheels4DynDatas[0],&wheelQueryResults[4*0],numActiveWheelsPerBlock4[0],carChassisCMLocalPose,localPoses0);
+	PxReal cambers0[4] = { 0,0,0,0 };
+	computeWheelLocalPoses(wheels4SimDatas[0],wheels4DynDatas[0],&wheelQueryResults[4*0],numActiveWheelsPerBlock4[0],carChassisCMLocalPose,localPoses0, cambers0);
 	wheelQueryResults[4*0 + 0].localPose = localPoses0[0];
 	wheelQueryResults[4*0 + 1].localPose = localPoses0[1];
 	wheelQueryResults[4*0 + 2].localPose = localPoses0[2];
 	wheelQueryResults[4*0 + 3].localPose = localPoses0[3];
+	wheelQueryResults[4*0 + 0].camberAngle = cambers0[0];
+	wheelQueryResults[4*0 + 1].camberAngle = cambers0[1];
+	wheelQueryResults[4*0 + 2].camberAngle = cambers0[2];
+	wheelQueryResults[4*0 + 3].camberAngle = cambers0[3];
 	vehicleConcurrentUpdates.concurrentWheelUpdates[4*0 + 0].localPose = localPoses0[0];
 	vehicleConcurrentUpdates.concurrentWheelUpdates[4*0 + 1].localPose = localPoses0[1];
 	vehicleConcurrentUpdates.concurrentWheelUpdates[4*0 + 2].localPose = localPoses0[2];
@@ -6690,11 +6751,16 @@ void PxVehicleUpdate::updateNoDrive
 	for(PxU32 i=1;i<numWheels4;i++)
 	{
 		PxTransform localPoses[4] = {PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity), PxTransform(PxIdentity)};
-		computeWheelLocalPoses(wheels4SimDatas[i],wheels4DynDatas[i],&wheelQueryResults[4*i],numActiveWheelsPerBlock4[i],carChassisCMLocalPose,localPoses);
+		PxReal cambers[4] = { 0,0,0,0 };
+		computeWheelLocalPoses(wheels4SimDatas[i],wheels4DynDatas[i],&wheelQueryResults[4*i],numActiveWheelsPerBlock4[i],carChassisCMLocalPose,localPoses, cambers);
 		wheelQueryResults[4*i + 0].localPose = localPoses[0];
 		wheelQueryResults[4*i + 1].localPose = localPoses[1];
 		wheelQueryResults[4*i + 2].localPose = localPoses[2];
 		wheelQueryResults[4*i + 3].localPose = localPoses[3];
+		wheelQueryResults[4*i + 0].camberAngle = cambers[0];
+		wheelQueryResults[4*i + 1].camberAngle = cambers[1];
+		wheelQueryResults[4*i + 2].camberAngle = cambers[2];
+		wheelQueryResults[4*i + 3].camberAngle = cambers[3];
 		vehicleConcurrentUpdates.concurrentWheelUpdates[4*i + 0].localPose = localPoses[0];
 		vehicleConcurrentUpdates.concurrentWheelUpdates[4*i + 1].localPose = localPoses[1];
 		vehicleConcurrentUpdates.concurrentWheelUpdates[4*i + 2].localPose = localPoses[2];
@@ -7228,6 +7294,11 @@ void physx::PxVehicleShiftOrigin(const PxVec3& shift, const PxU32 numVehicles, P
 	PxVehicleUpdate::shiftOrigin(shift, numVehicles, vehicles);
 }
 
+void physx::PxStoreVehicleRaycastResult(const PxVehicleWheels vehicle, physx::PxWheelQueryResult* wheelQueryResults)
+{
+	PxVehicleUpdate::storeRaycasts(*(vehicle.mWheelsDynData.getWheel4DynData()), wheelQueryResults);
+}
+
 ///////////////////////////////////////////////////////////////////////////////////
 //The following functions issue  a single batch of suspension raycasts for an array of vehicles of any type.
 //The buffer of sceneQueryResults is distributed among the vehicles in the array 
@@ -7241,7 +7312,9 @@ void PxVehicleWheels4SuspensionRaycasts
  PxRigidDynamic* vehActor)
 {
 	//Get the transform of the chassis.
-	PxTransform carChassisTrnsfm=vehActor->getGlobalPose().transform(vehActor->getCMassLocalPose());
+	PxTransform massXform = vehActor->getCMassLocalPose();
+	massXform.q = PxQuat(PxIdentity);
+	PxTransform carChassisTrnsfm = vehActor->getGlobalPose().transform(massXform);
 
 	//Add a raycast for each wheel.
 	for(PxU32 j=0;j<numActiveWheels;j++)

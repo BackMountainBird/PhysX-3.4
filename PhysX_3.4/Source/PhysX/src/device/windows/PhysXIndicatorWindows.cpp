@@ -37,10 +37,6 @@
 
 #include <stdio.h>
 
-#if _MSC_VER >= 1800
-#include <VersionHelpers.h>
-#endif
-
 // Scope-based to indicate to NV driver that CPU PhysX is happening
 physx::PhysXIndicator::PhysXIndicator(bool isGpu) 
 : mPhysXDataPtr(0), mFileHandle(0), mIsGpu(isGpu)
@@ -61,15 +57,11 @@ physx::PhysXIndicator::PhysXIndicator(bool isGpu)
 	
 	char configName[128];
 
-#if _MSC_VER >= 1800
-	if (!IsWindowsVistaOrGreater())
-#else
 	OSVERSIONINFOEX windowsVersionInfo;
 	windowsVersionInfo.dwOSVersionInfoSize = sizeof (windowsVersionInfo);
 	GetVersionEx((LPOSVERSIONINFO)&windowsVersionInfo);
 	
 	if (windowsVersionInfo.dwMajorVersion < 6)
-#endif
 		NvPhysXToDrv_Build_SectionNameXP(GetCurrentProcessId(), configName);
 	else
 		NvPhysXToDrv_Build_SectionName(GetCurrentProcessId(), configName);

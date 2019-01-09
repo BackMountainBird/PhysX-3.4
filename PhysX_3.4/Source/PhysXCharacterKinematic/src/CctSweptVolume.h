@@ -43,6 +43,7 @@ namespace Cct
 		{
 			eBOX,
 			eCAPSULE,
+			eOBB,
 
 			eLAST
 		};
@@ -62,6 +63,8 @@ namespace Cct
 
 						PxExtendedVec3			mCenter;
 						PxF32					mHalfHeight;	// UBI
+						PxF32					mOrient{ 0.0f };
+						PxF32					mRotateAngle{ 0.0f };
 		protected:
 						SweptVolumeType::Enum	mType;
 	};

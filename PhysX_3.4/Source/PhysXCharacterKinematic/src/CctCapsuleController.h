@@ -60,6 +60,7 @@ namespace Cct
 		virtual	PxControllerShapeType::Enum			getType()							const					{ return mType;							}
 		virtual void								release()													{ releaseInternal();					}
 		virtual	PxControllerCollisionFlags			move(const PxVec3& disp, PxF32 minDist, PxF32 elapsedTime, const PxControllerFilters& filters, const PxObstacleContext* obstacles);
+		virtual	PxControllerCollisionFlags			moveWithRotate(const PxVec3& disp, PxF32 minDist, PxF32 rotAngle, PxF32 elapsedTime, const PxControllerFilters& filters, const PxObstacleContext* obstacles=NULL) override;
 		virtual	bool								setPosition(const PxExtendedVec3& position)					{ return setPos(position);				}
 		virtual	const PxExtendedVec3&				getPosition()						const					{ return mPosition;						}
 		virtual	bool								setFootPosition(const PxExtendedVec3& position);
@@ -78,6 +79,8 @@ namespace Cct
 		virtual PxF32								getSlopeLimit()						const					{ return mUserParams.mSlopeLimit;		}
 		virtual void								setSlopeLimit(PxF32 slopeLimit)								{ if(slopeLimit>0.0f)
 																													mUserParams.mSlopeLimit = slopeLimit;}
+		virtual PxControllerOptimizeFlags			getOptimizeFlag()					const					{ return mUserParams.mOptimizeFlags;	}
+		virtual void								setOptimizeFlag(PxControllerOptimizeFlags flags)			{ mUserParams.mOptimizeFlags = flags;	}
 		virtual	void								invalidateCache();
 		virtual	PxScene*							getScene()													{ return mScene;						}
 		virtual	void*								getUserData()						const					{ return mUserData;						}
@@ -85,6 +88,11 @@ namespace Cct
 		virtual	void								getState(PxControllerState& state)	const					{ return getInternalState(state);		}
 		virtual	void								getStats(PxControllerStats& stats)	const					{ return getInternalStats(stats);		}
 		virtual	void								resize(PxReal height);
+
+		virtual		void							setNewCollision(bool val) override { mUserParams.mNewCollision = val; };
+		virtual		bool							getNewCollision(bool val) const override { return mUserParams.mNewCollision; };
+		virtual		void							setNewCollisionFriction(PxReal val) override { mUserParams.mNewCollisionFricition = val; };
+		virtual		PxReal							getNewCollisionFriction() const override { return mUserParams.mNewCollisionFricition; };
 		//~PxController
 
 		// PxCapsuleController

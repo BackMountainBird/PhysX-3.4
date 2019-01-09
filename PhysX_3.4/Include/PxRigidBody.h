@@ -453,6 +453,14 @@ public:
 	*/
 	virtual		void			clearTorque(PxForceMode::Enum mode = PxForceMode::eFORCE) = 0;
 
+	virtual		PxVec3			getLinearAcceleration() = 0;
+
+	virtual		PxVec3			getLinearAccumulator() = 0;
+
+	virtual		PxVec3			getAngularAcceleration() = 0;
+
+	virtual		PxVec3			getAngularAccumulator() = 0;
+
 	/**
 	\brief Raises or clears a particular rigid body flag.
 	

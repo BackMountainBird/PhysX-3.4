@@ -34,15 +34,19 @@
 #include "foundation/Px.h"
 
 // define API function declaration
-#if PX_WINDOWS
-    #if defined PX_PHYSX_COOKING_EXPORTS
-	    #define PX_PHYSX_COOKING_API __declspec(dllexport)
-	#else
-	    #define PX_PHYSX_COOKING_API __declspec(dllimport)
+#if defined PX_PHYSX_STATIC_LIB
+	#define PX_PHYSX_COOKING_API
+#else
+	#if PX_WINDOWS
+		#if defined PX_PHYSX_COOKING_EXPORTS
+			#define PX_PHYSX_COOKING_API __declspec(dllexport)
+		#else
+			#define PX_PHYSX_COOKING_API __declspec(dllimport)
+		#endif
+	#elif PX_UNIX_FAMILY
+		#define PX_PHYSX_COOKING_API PX_UNIX_EXPORT
 	#endif
-#elif PX_UNIX_FAMILY
-	#define PX_PHYSX_COOKING_API PX_UNIX_EXPORT
-#endif
+#endif // PX_PHYSX_STATIC_LIB
 
 #if !defined(PX_PHYSX_COOKING_API)
     #define PX_PHYSX_COOKING_API

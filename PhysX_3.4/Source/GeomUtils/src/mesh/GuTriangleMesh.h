@@ -51,6 +51,12 @@ class PxMeshScale;
 
 namespace Gu
 {
+	class TriangleMesh;
+}
+void cloneTriangleMesh(Gu::TriangleMesh* clone, Gu::TriangleMesh* orig);
+
+namespace Gu
+{
 
 #if PX_VC
 #pragma warning(push)
@@ -177,6 +183,9 @@ public:
 								PxU32*					mGRB_faceRemap;					//!< GRB : gpu to cpu triangle indice remap
 								void*					mGRB_BV32Tree;					//!< GRB: BV32 tree
 								// End of GRB data ------------------
+
+								// Bleston : 
+								friend void physx::cloneTriangleMesh(TriangleMesh* clone, TriangleMesh* orig);
 
 };
 

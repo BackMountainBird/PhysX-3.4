@@ -68,11 +68,14 @@ namespace Cct
 		PxF32								mInvisibleWallHeight;
 		PxF32								mMaxJumpHeight;
 		PxF32								mMaxEdgeLength2;
+		PxF32								mNewCollisionFricition;
+		PxControllerOptimizeFlags			mOptimizeFlags;
 		bool								mTessellation;
 		bool								mHandleSlope;		// True to handle walkable parts according to slope
 		bool								mOverlapRecovery;
 		bool								mPreciseSweeps;
 		bool								mPreventVerticalSlidingAgainstCeiling;
+		bool								mNewCollision;
 	};
 
 //	typedef Ps::Array<PxTriangle>	TriArray;
@@ -277,7 +280,8 @@ namespace Cct
 		SWEEP_PASS_UP,
 		SWEEP_PASS_SIDE,
 		SWEEP_PASS_DOWN,
-		SWEEP_PASS_SENSOR
+		SWEEP_PASS_SENSOR,
+		SWEEP_PASS_ROTATE
 	};
 	
 	class Controller;
@@ -346,6 +350,14 @@ namespace Cct
 													SweptVolume& swept_volume,
 													const PxVec3& direction, const PxVec3& sideVector, PxU32 max_iter,
 													PxU32* nb_collisions, PxF32 min_dist, const PxControllerFilters& filters, SweepPass sweepPass,
+													const PxRigidActor*& touchedActor, const PxShape*& touchedShape, PxU64 contextID);
+
+					bool				doRotateTest(const InternalCBData_FindTouchedGeom* userDataTouchedGeom,
+													const InternalCBData_OnHit* userDataOnHit,
+													const UserObstacles& userObstacles,
+													SweptVolume& swept_volume,
+													PxU32* nb_collisions, PxVec3& slidingVector,
+													const PxControllerFilters& filters, SweepPass sweepPass,
 													const PxRigidActor*& touchedActor, const PxShape*& touchedShape, PxU64 contextID);
 
 					void				findTouchedObstacles(const UserObstacles& userObstacles, const PxExtendedBounds3& world_box);

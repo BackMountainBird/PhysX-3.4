@@ -36,6 +36,7 @@
 #include "GuHeightFieldUtil.h"
 #include "GuBoxConversion.h"
 #include "GuIntersectionTriangleBox.h"
+#include "GuIntersectionRayTriangle.h"
 #include "CmScaling.h"
 #include "GuSweepTests.h"
 #include "GuSIMDHelpers.h"
@@ -299,6 +300,74 @@ bool physx::PxMeshQuery::sweep(	const PxVec3& unitDir, const PxReal maxDistance,
 			PX_CHECK_MSG(false, "PxMeshQuery::sweep(): geometry object parameter must be sphere, capsule or box geometry.");
 	}
 	return false;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+bool physx::PxMeshQuery::raycast(const PxVec3& rayOrig,
+	const PxVec3& rayNormDir,
+	const PxReal maxDistance,
+	PxU32 triangleCount,
+	const PxTriangle* trangles,
+	PxRaycastHit& raycastHit,
+	PxHitFlags hintFlags,
+	const PxU32* cachedIndex,
+	const PxReal inflation,
+	bool doubleSided)
+{
+	PX_SIMD_GUARD;
+	PX_CHECK_AND_RETURN_VAL(rayOrig.isFinite(), "physx::PxMeshQuery::raycast(): rayOrig is not valid.", false);
+	PX_CHECK_AND_RETURN_VAL(rayNormDir.isFinite(), "physx::PxMeshQuery::raycast(): rayNormDir is not valid.", false);
+	PX_CHECK_AND_RETURN_VAL(PxIsFinite(maxDistance), "physx::PxMeshQuery::raycast(): distance is not valid.", false);
+	PX_CHECK_AND_RETURN_VAL(maxDistance > 0, "physx::PxMeshQuery::raycast(): raycast distance must be greater than 0.", false);
+
+	raycastHit.distance = PX_MAX_SWEEP_DISTANCE;
+
+	PX_UNUSED(hintFlags);
+
+	if (!triangleCount)
+		return false;
+
+
+	PxReal t, u, v;
+	bool isCulling = !doubleSided;
+	bool isHit = false;
+	for (PxU32 iTri = 0; iTri < triangleCount; iTri++)
+	{
+		const auto& v0 = trangles[iTri].verts[0];
+		const auto& v1 = trangles[iTri].verts[1];
+		const auto& v2 = trangles[iTri].verts[2];
+		PxReal tu, tv;
+		auto ret = intersectRayTriangle(rayOrig, rayNormDir, v0, v1, v2, t, u, v, isCulling, inflation);
+		if (ret && t < raycastHit.distance && t >= 0.0f)
+		{
+			raycastHit.distance = t;
+			raycastHit.u = u;
+			raycastHit.v = v;
+			raycastHit.faceIndex = iTri;
+			isHit = true;
+		}
+	}
+
+	if (isHit)
+	{
+		const auto& v0 = trangles[raycastHit.faceIndex].verts[0];
+		const auto& v1 = trangles[raycastHit.faceIndex].verts[1];
+		const auto& v2 = trangles[raycastHit.faceIndex].verts[2];
+		auto u = raycastHit.u;
+		auto v = raycastHit.v;
+		const PxVec3 localImpact = (1.0f - u - v)*v0 + u * v1 + v * v2;
+
+		raycastHit.position = localImpact;
+		raycastHit.normal = (v1 - v0).cross(v2 - v0);
+		raycastHit.normal.normalize();
+		if (doubleSided && raycastHit.normal.dot(rayNormDir) > 0.0f)
+			raycastHit.normal = -raycastHit.normal;
+
+		raycastHit.flags = PxHitFlag::ePOSITION | PxHitFlag::eDISTANCE | PxHitFlag::eUV;
+	}
+
+	return isHit;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

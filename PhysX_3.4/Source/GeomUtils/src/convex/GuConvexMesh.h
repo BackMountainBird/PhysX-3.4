@@ -50,6 +50,10 @@ class GuMeshFactory;
 class PxMeshScale;
 
 
+// Bleston:
+namespace Gu { class ConvexMesh; };
+void cloneConvexMesh(Gu::ConvexMesh* clone, Gu::ConvexMesh* orig);
+
 namespace Gu
 {
 	struct HullPolygonData;
@@ -169,6 +173,9 @@ private:
 
 		PX_FORCE_INLINE	PxU32					getNb()												const	{ return mNb;						}
 		PX_FORCE_INLINE	PxU32					ownsMemory()										const	{ return PxU32(!mNb.isBitSet());	}
+
+		// Bleston : 
+		friend void physx::cloneConvexMesh(Gu::ConvexMesh* clone, Gu::ConvexMesh* orig);
 	};
 
 } // namespace Gu

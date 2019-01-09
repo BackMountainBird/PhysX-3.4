@@ -110,6 +110,11 @@ public:
 	virtual		void				addTorque(const PxVec3&, PxForceMode::Enum mode, bool autowake);
 	virtual		void				clearTorque(PxForceMode::Enum mode);
 
+	virtual		PxVec3				getLinearAcceleration()	override;
+	virtual		PxVec3				getLinearAccumulator() override;
+	virtual		PxVec3				getAngularAcceleration() override;
+	virtual		PxVec3				getAngularAccumulator() override;
+
 	// Sleeping
 	virtual		bool				isSleeping() const;
 	virtual		PxReal				getSleepThreshold() const;

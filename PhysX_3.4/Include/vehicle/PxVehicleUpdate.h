@@ -186,6 +186,8 @@ namespace physx
 		*/
 		PxVec3 tireLateralDir;
 
+		PxVec3 tireForce;
+
 		/**
 		\brief Longitudinal slip of the tire.
 		\note If suspension travel limits forbid the wheel from touching the drivable surface then longitudinalSlip is 0.0
@@ -211,6 +213,11 @@ namespace physx
 		@see PxVehicleWheelData::mToeAngle
 		*/	
 		PxReal steerAngle;
+
+		/**
+		\brief Camber angle of the wheel. Add by Bleston
+		*/
+		PxReal camberAngle;
 
 		/**
 		\brief Local pose of the wheel.
@@ -533,6 +540,8 @@ namespace physx
 	\param[in,out] vehicles is an array of all vehicles that should be updated to map to the new scene origin.
 	*/
 	void PxVehicleShiftOrigin(const PxVec3& shift, const PxU32 nbVehicles, PxVehicleWheels** vehicles);
+
+	void PxStoreVehicleRaycastResult(const PxVehicleWheels vehicle, physx::PxWheelQueryResult* wheelQueryResults);
 
 #if PX_DEBUG_VEHICLE_ON
 	/**

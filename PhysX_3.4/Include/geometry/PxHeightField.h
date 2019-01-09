@@ -35,6 +35,7 @@
 */
 
 #include "geometry/PxHeightFieldFlag.h"
+#include "geometry/PxHeightFieldSample.h"
 #include "common/PxBase.h"
 
 #if !PX_DOXYGEN
@@ -245,6 +246,8 @@ class PxHeightField	: public PxBase
 	PX_PHYSX_COMMON_API virtual		PxU32						getTimestamp()			const	= 0;
 
 	PX_PHYSX_COMMON_API virtual	const char*				getConcreteTypeName() const { return "PxHeightField"; }
+
+	PX_PHYSX_COMMON_API virtual const PxHeightFieldSample&	getSample(PxU32 vertexIndex) const = 0;
 
 protected:
 						PX_INLINE						PxHeightField(PxType concreteType, PxBaseFlags baseFlags) : PxBase(concreteType, baseFlags) {}

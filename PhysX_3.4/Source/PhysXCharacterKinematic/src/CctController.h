@@ -89,6 +89,7 @@ namespace Cct
 					PxRigidDynamic*						mKineActor;			// Associated kinematic actor
 					PxExtendedVec3						mPosition;			// Current position
 					PxVec3								mDeltaXP;
+					PxF32								mDeltaOrient;
 					PxVec3								mOverlapRecover;
 					PxScene*							mScene;				// Handy scene owner
 					PxU32								mPreviousSceneTimestamp;					

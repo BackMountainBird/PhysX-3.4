@@ -303,7 +303,9 @@ PX_INLINE PxU16 Shape::getNbMaterials() const
 
 PX_INLINE PxMaterial* Shape::getMaterial(PxU32 index) const
 {
-	PX_ASSERT(index < getNbMaterials());
+	index = index < getNbMaterials() ? index : 0;
+	if (getNbMaterials() == 0)
+		return nullptr;
 
 	NpMaterialManager& matManager = NpPhysics::getInstance().getMaterialManager();
 	if(isBuffered(Buf::BF_Material))

@@ -30,6 +30,7 @@
 #include "CctCharacterControllerManager.h"
 #include "CctBoxController.h"
 #include "CctCapsuleController.h"
+#include "CctRotatableController.h"
 #include "CctObstacleContext.h"
 #include "CmBoxPruning.h"
 #include "GuDistanceSegmentSegment.h"
@@ -40,6 +41,8 @@
 #include "PxScene.h"
 #include "PxPhysics.h"
 #include "PsFoundation.h"
+
+#include "GuCylinder.h"
 
 using namespace physx;
 using namespace Cct;
@@ -159,6 +162,12 @@ PxController* CharacterControllerManager::createController(const PxControllerDes
 		newController = capsuleController;
 		N = capsuleController;
 	}
+	else if (desc.getType() == PxControllerShapeType::eROTATABLE)
+	{
+		RotatableController* rotatableController = PX_NEW(RotatableController)(desc, mScene.getPhysics(), &mScene);
+		newController = rotatableController;
+		N = rotatableController;
+	}
 	else PX_ALWAYS_ASSERT_MESSAGE( "INTERNAL ERROR - invalid CCT type, should have been caught by isValid().");
 
 	if(newController)
@@ -203,6 +212,11 @@ void CharacterControllerManager::releaseController(PxController& controller)
 		BoxController* bc = static_cast<BoxController*>(&controller);
 		PX_DELETE(bc);
 	} 
+	else if (controller.getType() == PxControllerShapeType::eROTATABLE)
+	{
+		RotatableController* rc = (RotatableController*)&controller;
+		PX_DELETE(rc);
+	}
 	else PX_ASSERT(0);
 }
 
@@ -492,18 +506,161 @@ static PxVec3 fixDir(const PxVec3& dir, const PxVec3& up)
 	return tangentCompo.getNormalized();
 }
 
+static void cylinderWrapForCapsule(Gu::Cylinder& cylinder,
+	const PxExtendedCapsule& capsule)
+{
+	PxVec3 dir;
+	capsule.computeDirection(dir);
+	cylinder.radius = capsule.radius;
+	cylinder.p0 = toVec3(capsule.p0);
+	cylinder.p1 = toVec3(capsule.p1);
+	dir.normalize();
+	cylinder.p0 = cylinder.p0 - dir * cylinder.radius;
+	cylinder.p1 = cylinder.p1 + dir * cylinder.radius;
+}
+
+static void computeCharacterOverlap(const PxExtendedBox& obb0, const PxExtendedBox& obb1, const PxVec3& upVector, PxF32& overlap, PxVec3& dir)
+{
+	PxVec3 mtd;
+	PxF32 depth;
+	if (computeMTD(mtd, depth,
+		obb0.extents, toVec3(obb0.center), PxMat33(obb0.rot),
+		obb1.extents, toVec3(obb1.center), PxMat33(obb1.rot)))
+	{
+		const PxVec3 center0 = toVec3(obb0.center);
+		const PxVec3 center1 = toVec3(obb1.center);
+		const PxVec3 witness = center0 - center1;
+		if (mtd.dot(witness)<0.0f)
+			dir = -mtd;
+		else
+			dir = mtd;
+		dir = fixDir(dir, upVector);
+		overlap = depth;
+	}
+}
+
+static void computeCharacterOverlap(const PxExtendedBox& obb, const PxExtendedCapsule& capsule, const PxVec3& upVector, PxF32& overlap, PxVec3& dir)
+{
+	const PxVec3 p0 = toVec3(capsule.p0);
+	const PxVec3 p1 = toVec3(capsule.p1);
+
+	PxF32 t;
+	PxVec3 p;
+	const PxMat33 M(obb.rot);
+	const PxVec3 boxCenter = toVec3(obb.center);
+	const PxF32 d = sqrtf(Gu::distanceSegmentBoxSquared(p0, p1, boxCenter, obb.extents, M, &t, &p));
+	if (d<capsule.radius)
+	{
+		//			const PxVec3 center0 = M.transform(p) + boxCenter;
+		//			const PxVec3 center1 = t * p0 + (1.0f - t) * p1;
+		const PxVec3 center0 = boxCenter;
+		const PxVec3 center1 = (p0 + p1)*0.5f;
+		dir = fixDir(center0 - center1, upVector);
+		overlap = capsule.radius - d;
+	}
+}
+
+static void computeCharacterOverlap(const PxExtendedCapsule& capsule0, const PxExtendedCapsule& capsule1, const PxVec3& upVector, PxF32& overlap, PxVec3& dir)
+{
+	const PxF32 r = capsule0.radius + capsule1.radius;
+
+	// Bleston : Since we use cylinder vs cylinder for capsule cct collision, the below code is not suitable
+	/*
+	const PxVec3 p00 = toVec3(capsule0.p0);
+	const PxVec3 p01 = toVec3(capsule0.p1);
+	const PxVec3 p10 = toVec3(capsule1.p0);
+	const PxVec3 p11 = toVec3(capsule1.p1);
+
+	PxF32 s,t;
+	const PxF32 d = sqrtf(Gu::distanceSegmentSegmentSquaredOLD(p00, p01 - p00, p10, p11 - p10, &s, &t));
+	if(d<r)
+	{
+	const PxVec3 center0 = s * p00 + (1.0f - s) * p01;
+	const PxVec3 center1 = t * p10 + (1.0f - t) * p11;
+	const PxVec3 up = entity0->mUserParams.mUpDirection;
+	dir = fixDir(center0 - center1, up);
+	overlap = r - d;
+	}
+	*/
+
+	// Bleston : use cylinder vs cylinder overlap. Assume the cylinders are parallel
+	Gu::Cylinder cylinder0, cylinder1;
+	cylinderWrapForCapsule(cylinder0, capsule0);
+	cylinderWrapForCapsule(cylinder1, capsule1);
+	auto dv = cylinder0.computeCenter() - cylinder1.computeCenter();
+	PxVec3 normalCompo, tangentCompo;
+	Ps::decomposeVector(normalCompo, tangentCompo, dv, upVector);
+	auto d = tangentCompo.normalize();
+	if ((normalCompo.magnitude() < cylinder0.length() + cylinder1.length()) && (d < r))
+	{
+		dir = tangentCompo;
+		overlap = r - d;
+	}
+}
+
 static void InteractionCharacterCharacter(Controller* entity0, Controller* entity1, PxF32 elapsedTime)
 {
 	PX_ASSERT(entity0);
 	PX_ASSERT(entity1);
 
-	PxF32 overlap=0.0f;
+	PxF32 overlap = 0.0f;
 	PxVec3 dir(0.0f);
 
-	if(entity0->mType>entity1->mType)
+	if (entity0->mType>entity1->mType)
 		Ps::swap(entity0, entity1);
 
-	if(entity0->mType==PxControllerShapeType::eCAPSULE && entity1->mType==PxControllerShapeType::eCAPSULE)
+	if (entity0->mType == PxControllerShapeType::eBOX && entity1->mType == PxControllerShapeType::eBOX)
+	{
+		PX_ASSERT(entity0->mType == PxControllerShapeType::eBOX);
+		PX_ASSERT(entity1->mType == PxControllerShapeType::eBOX);
+		BoxController* cc0 = static_cast<BoxController*>(entity0);
+		BoxController* cc1 = static_cast<BoxController*>(entity1);
+
+		PxExtendedBox obb0;
+		cc0->getOBB(obb0);
+
+		PxExtendedBox obb1;
+		cc1->getOBB(obb1);
+
+		computeCharacterOverlap(obb0, obb1, entity0->mUserParams.mUpDirection, overlap, dir);
+	}
+	else if (entity0->mType == PxControllerShapeType::eBOX && entity1->mType == PxControllerShapeType::eCAPSULE)
+	{
+		BoxController* cc0 = static_cast<BoxController*>(entity0);
+		CapsuleController* cc1 = static_cast<CapsuleController*>(entity1);
+
+		PxExtendedBox obb;
+		cc0->getOBB(obb);
+
+		PxExtendedCapsule capsule;
+		cc1->getCapsule(capsule);
+
+		computeCharacterOverlap(obb, capsule, entity0->mUserParams.mUpDirection, overlap, dir);
+	}
+	else if (entity0->mType == PxControllerShapeType::eBOX && entity1->mType == PxControllerShapeType::eROTATABLE)
+	{
+		BoxController* cc0 = static_cast<BoxController*>(entity0);
+		RotatableController* cc1 = static_cast<RotatableController*>(entity1);
+
+		PxExtendedBox obb0;
+		cc0->getOBB(obb0);
+
+		if (cc1->getShapeType() == PxRotatableShapeType::eOBB)
+		{
+
+			PxExtendedBox obb1;
+			cc1->getOBB(obb1);
+			computeCharacterOverlap(obb0, obb1, entity0->mUserParams.mUpDirection, overlap, dir);
+		}
+		else
+		{
+			PX_ASSERT(cc1->getShapeType() == PxRotatableShapeType::eCapsule);
+			PxExtendedCapsule capsule1;
+			cc1->getCapsule(capsule1);
+			computeCharacterOverlap(obb0, capsule1, entity0->mUserParams.mUpDirection, overlap, dir);
+		}
+	}
+	else if (entity0->mType == PxControllerShapeType::eCAPSULE && entity1->mType == PxControllerShapeType::eCAPSULE)
 	{
 		CapsuleController* cc0 = static_cast<CapsuleController*>(entity0);
 		CapsuleController* cc1 = static_cast<CapsuleController*>(entity1);
@@ -514,93 +671,84 @@ static void InteractionCharacterCharacter(Controller* entity0, Controller* entit
 		PxExtendedCapsule capsule1;
 		cc1->getCapsule(capsule1);
 
-		const PxF32 r = capsule0.radius + capsule1.radius;
-
-		const PxVec3 p00 = toVec3(capsule0.p0);
-		const PxVec3 p01 = toVec3(capsule0.p1);
-		const PxVec3 p10 = toVec3(capsule1.p0);
-		const PxVec3 p11 = toVec3(capsule1.p1);
-
-		PxF32 s,t;
-		const PxF32 d = sqrtf(Gu::distanceSegmentSegmentSquared(p00, p01 - p00, p10, p11 - p10, &s, &t));
-		if(d<r)
-		{
-			const PxVec3 center0 = s * p00 + (1.0f - s) * p01;
-			const PxVec3 center1 = t * p10 + (1.0f - t) * p11;
-			const PxVec3 up = entity0->mCctModule.mUserParams.mUpDirection;
-			dir = fixDir(center0 - center1, up);
-			overlap = r - d;
-		}
+		computeCharacterOverlap(capsule0, capsule1, entity0->mUserParams.mUpDirection, overlap, dir);
 	}
-	else if(entity0->mType==PxControllerShapeType::eBOX && entity1->mType==PxControllerShapeType::eCAPSULE)
+	else if (entity0->mType == PxControllerShapeType::eCAPSULE && entity1->mType == PxControllerShapeType::eROTATABLE)
 	{
-		BoxController* cc0 = static_cast<BoxController*>(entity0);
-		CapsuleController* cc1 = static_cast<CapsuleController*>(entity1);
+		CapsuleController* cc0 = static_cast<CapsuleController*>(entity0);
+		RotatableController* cc1 = static_cast<RotatableController*>(entity1);
 
-		PxExtendedBox obb;
-		cc0->getOBB(obb);
+		PxExtendedCapsule capsule0;
+		cc0->getCapsule(capsule0);
 
-		PxExtendedCapsule capsule;
-		cc1->getCapsule(capsule);
-		const PxVec3 p0 = toVec3(capsule.p0);
-		const PxVec3 p1 = toVec3(capsule.p1);
-
-		PxF32 t;
-		PxVec3 p;
-		const PxMat33 M(obb.rot);
-		const PxVec3 boxCenter = toVec3(obb.center);
-		const PxF32 d = sqrtf(Gu::distanceSegmentBoxSquared(p0, p1, boxCenter, obb.extents, M, &t, &p));
-		if(d<capsule.radius)
+		if (cc1->getShapeType() == PxRotatableShapeType::eOBB)
 		{
-//			const PxVec3 center0 = M.transform(p) + boxCenter;
-//			const PxVec3 center1 = t * p0 + (1.0f - t) * p1;
-			const PxVec3 center0 = boxCenter;
-			const PxVec3 center1 = (p0 + p1)*0.5f;
-			const PxVec3 up = entity0->mCctModule.mUserParams.mUpDirection;
-			dir = fixDir(center0 - center1, up);
-			overlap = capsule.radius - d;
+			PxExtendedBox obb1;
+			cc1->getOBB(obb1);
+			computeCharacterOverlap(obb1, capsule0, entity1->mUserParams.mUpDirection, overlap, dir);
+			dir = -dir;
+		}
+		else
+		{
+			PX_ASSERT(cc1->getShapeType() == PxRotatableShapeType::eCapsule);
+			PxExtendedCapsule capsule1;
+			cc1->getCapsule(capsule1);
+			computeCharacterOverlap(capsule0, capsule1, entity0->mUserParams.mUpDirection, overlap, dir);
 		}
 	}
 	else
 	{
-		PX_ASSERT(entity0->mType==PxControllerShapeType::eBOX);
-		PX_ASSERT(entity1->mType==PxControllerShapeType::eBOX);
-		BoxController* cc0 = static_cast<BoxController*>(entity0);
-		BoxController* cc1 = static_cast<BoxController*>(entity1);
+		PX_ASSERT(entity0->mType == PxControllerShapeType::eROTATABLE);
+		PX_ASSERT(entity1->mType == PxControllerShapeType::eROTATABLE);
+		RotatableController* cc0 = static_cast<RotatableController*>(entity0);
+		RotatableController* cc1 = static_cast<RotatableController*>(entity1);
 
-		PxExtendedBox obb0;
-		cc0->getOBB(obb0);
-
-		PxExtendedBox obb1;
-		cc1->getOBB(obb1);
-
-		PxVec3 mtd;
-		PxF32 depth;
-		if(computeMTD(	mtd, depth,
-						obb0.extents, toVec3(obb0.center), PxMat33(obb0.rot),
-						obb1.extents, toVec3(obb1.center), PxMat33(obb1.rot)))
+		if (cc0->getShapeType() == PxRotatableShapeType::eOBB && cc1->getShapeType() == PxRotatableShapeType::eOBB)
 		{
-			const PxVec3 center0 = toVec3(obb0.center);
-			const PxVec3 center1 = toVec3(obb1.center);
-			const PxVec3 witness = center0 - center1;
-			if(mtd.dot(witness)<0.0f)
-				dir = -mtd;
-			else
-				dir = mtd;
-			const PxVec3 up = entity0->mCctModule.mUserParams.mUpDirection;
-			dir = fixDir(dir, up);
-			overlap = depth;
+			PxExtendedBox obb0;
+			PxExtendedBox obb1;
+			cc0->getOBB(obb0);
+			cc1->getOBB(obb1);
+			computeCharacterOverlap(obb0, obb1, entity0->mUserParams.mUpDirection, overlap, dir);
+		}
+		else if (cc0->getShapeType() == PxRotatableShapeType::eOBB && cc1->getShapeType() == PxRotatableShapeType::eCapsule)
+		{
+			PxExtendedBox obb0;
+			PxExtendedCapsule capsule1;
+			cc0->getOBB(obb0);
+			cc1->getCapsule(capsule1);
+			computeCharacterOverlap(obb0, capsule1, entity0->mUserParams.mUpDirection, overlap, dir);
+		}
+		else if (cc0->getShapeType() == PxRotatableShapeType::eCapsule && cc1->getShapeType() == PxRotatableShapeType::eOBB)
+		{
+			PxExtendedCapsule capsule0;
+			PxExtendedBox obb1;
+			cc0->getCapsule(capsule0);
+			cc1->getOBB(obb1);
+			computeCharacterOverlap(obb1, capsule0, entity1->mUserParams.mUpDirection, overlap, dir);
+			dir = -dir;
+		}
+		else
+		{
+			PX_ASSERT(cc0->getShapeType() == PxRotatableShapeType::eCapsule);
+			PX_ASSERT(cc1->getShapeType() == PxRotatableShapeType::eCapsule);
+			PxExtendedCapsule capsule0;
+			PxExtendedCapsule capsule1;
+			cc0->getCapsule(capsule0);
+			cc1->getCapsule(capsule1);
+			computeCharacterOverlap(capsule0, capsule1, entity0->mUserParams.mUpDirection, overlap, dir);
 		}
 	}
 
-	if(overlap!=0.0f)
+	if (overlap != 0.0f)
 	{
 		// We want to limit this to some reasonable amount, to avoid obvious "popping".
 		const PxF32 maxOverlap = gMaxOverlapRecover * elapsedTime;
-		if(overlap>maxOverlap)
-			overlap=maxOverlap;
+		if (overlap>maxOverlap)
+			overlap = maxOverlap;
 
-		const PxVec3 sep = dir * overlap * 0.5f;
+		//const PxVec3 sep = dir * overlap * 0.5f;
+		const PxVec3 sep = dir * (overlap + 0.2f);
 		entity0->mOverlapRecover += sep;
 		entity1->mOverlapRecover -= sep;
 	}
@@ -620,6 +768,9 @@ void CharacterControllerManager::computeInteractions(PxF32 elapsedTime, PxContro
 
 		PxExtendedBounds3 extBox;
 		current->getWorldBox(extBox);
+
+		// Reset the mOverlapRecover to zero
+		current->mOverlapRecover = PxVec3(0.0f);
 
 		*runningBoxes++ = PxBounds3(toVec3(extBox.minimum), toVec3(extBox.maximum));	// ### LOSS OF ACCURACY
 	}

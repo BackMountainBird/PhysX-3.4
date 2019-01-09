@@ -211,6 +211,24 @@ void Sc::BodyCore::clearSpatialAcceleration(bool force, bool torque)
 	}
 }
 
+void Sc::BodyCore::getSpatialAcceleration(PxVec3* linAcc, PxVec3* angAcc)
+{
+	BodySim* sim = getSim();
+
+	if (!mSimStateData || !mSimStateData->isVelMod())
+		return;
+
+	VelocityMod* velmod = mSimStateData->getVelocityModData();
+	if (linAcc)
+	{
+		*linAcc = velmod->getLinearVelModPerSec();
+	}
+	if (angAcc)
+	{
+		*angAcc = velmod->getAngularVelModPerSec();
+	}
+}
+
 void Sc::BodyCore::addSpatialVelocity(Ps::Pool<SimStateData>* simStateDataPool, const PxVec3* linVelDelta, const PxVec3* angVelDelta)
 {
 	//The dirty flag is stored separately in the BodySim so that we query the dirty flag before going to 
@@ -249,6 +267,24 @@ void Sc::BodyCore::clearSpatialVelocity(bool force, bool torque)
 			velmod->clearLinearVelModPerStep();
 		if(torque)
 			velmod->clearAngularVelModPerStep();
+	}
+}
+
+void Sc::BodyCore::getSpatialVelocity(PxVec3* linVelDelta, PxVec3* angVelDelta)
+{
+	BodySim* sim = getSim();
+
+	if (!mSimStateData || !mSimStateData->isVelMod())
+		return;
+
+	VelocityMod* velmod = mSimStateData->getVelocityModData();
+	if (linVelDelta)
+	{
+		*linVelDelta = velmod->getLinearVelModPerStep();
+	}
+	if (angVelDelta)
+	{
+		*angVelDelta = velmod->getAngularVelModPerStep();
 	}
 }
 

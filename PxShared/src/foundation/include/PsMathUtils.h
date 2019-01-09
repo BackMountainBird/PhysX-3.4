@@ -326,6 +326,36 @@ PX_CUDA_CALLABLE PX_FORCE_INLINE bool sameDirection(const PxVec3& d, const PxVec
 	return d.dot(p) >= 0.0f;
 }
 
+PX_CUDA_CALLABLE PX_FORCE_INLINE bool isAlmostZero(const PxReal d)
+{
+	return (d <= PX_EPS_REAL) && (d >= -PX_EPS_REAL);
+}
+
+PX_CUDA_CALLABLE PX_FORCE_INLINE bool isAlmostSame(const PxReal d, const PxReal p)
+{
+	return (d <= p + PX_EPS_REAL) && (d >= p - PX_EPS_REAL);
+}
+
+//! \brief Test whether the vectors are paralled.
+PX_CUDA_CALLABLE PX_FORCE_INLINE bool parallelDirection(const PxVec3& d, const PxVec3& p)
+{
+	if (d.isZero() || p.isZero())
+		return false;
+	if (!isAlmostZero(d.x) && !isAlmostZero(p.x))
+	{
+		return isAlmostSame(d.y / d.x, p.y / p.x) && isAlmostSame(d.z / d.x, p.z / p.x);
+	}
+	else if (!isAlmostZero(d.y) && !isAlmostZero(p.y))
+	{
+		return isAlmostSame(d.x / d.y, p.x / p.y) && isAlmostSame(d.z / d.y, p.z / p.y);
+	}
+	else if (!isAlmostZero(d.z) && !isAlmostZero(p.z))
+	{
+		return isAlmostSame(d.x / d.z, p.x / p.z) && isAlmostSame(d.y / d.z, p.y / p.z);
+	}
+	return false;
+}
+
 //! Checks 2 values have different signs
 PX_CUDA_CALLABLE PX_FORCE_INLINE IntBool differentSign(PxReal f0, PxReal f1)
 {
@@ -492,9 +522,6 @@ PX_FORCE_INLINE void normalToTangents(const PxVec3& normal, PxVec3& tangent0, Px
 	tangent0.normalize();
 	tangent1 = normal.cross(tangent0);
 }
-
-// todo: what is this function doing?
-PX_FOUNDATION_API PxQuat computeQuatFromNormal(const PxVec3& n);
 
 /**
 \brief computes a oriented bounding box around the scaled basis.

@@ -498,6 +498,15 @@ static void visualizeTriangleMesh(const PxTriangleMeshGeometry& geometry, Render
 				outputTriangle(segments, wp[0], wp[1], wp[2], scolor);
 				segments+=3;
 			}
+			// Bleston : also output the triangle faces.
+			out << Cm::RenderOutput::TRIANGLES;
+			for (PxU32 i = 0; i < nbTriangles; i++)
+			{
+				const PxU32 index = results[i];
+				PxVec3 wp[3];
+				getTriangle(*triangleMesh, results[i], wp, vertices, indices, absPose, has16Bit);
+				out << wp[0] << wp[1] << wp[2];
+			}
 		}
 	}
 	else
@@ -520,6 +529,15 @@ static void visualizeTriangleMesh(const PxTriangleMeshGeometry& geometry, Render
 				getTriangle(*triangleMesh, i, wp, transformed, indices, has16Bit);
 				outputTriangle(segments, wp[0], wp[1], wp[2], scolor);
 				segments+=3;
+			}
+
+			// Bleston : also output the triangle faces.
+			out << Cm::RenderOutput::TRIANGLES;
+			for (PxU32 i = 0; i < nbTriangles; i++)
+			{
+				PxVec3 wp[3];
+				getTriangle(*triangleMesh, i, wp, transformed, indices, has16Bit);
+				out << wp[0] << wp[1] << wp[2];
 			}
 
 			PX_FREE(transformed);
@@ -578,6 +596,15 @@ static void visualizeHeightField(const PxHeightFieldGeometry& hfGeometry, Render
 			}
 		}
 		PX_FREE(results);
+		// Bleston : get the triangle mesh
+		out << Cm::RenderOutput::TRIANGLES;
+		for (PxU32 i = 0; i<nbTouchedTris; i++)
+		{
+			const PxU32 index = results[i];
+			PxTriangle currentTriangle;
+			PxMeshQuery::getTriangle(hfGeometry, absPose, index, currentTriangle);
+			out << currentTriangle.verts[0] << currentTriangle.verts[1] << currentTriangle.verts[2];
+		}
 	}
 	else
 	{
@@ -596,6 +623,21 @@ static void visualizeHeightField(const PxHeightFieldGeometry& hfGeometry, Render
 
 				PxDebugLine* segments = out.reserveSegments(3);
 				outputTriangle(segments, tmpVerts[vi0], tmpVerts[vi1], tmpVerts[vi2], scolor);
+			}
+		}
+		// Bleston : get the triangle mesh
+		out << Cm::RenderOutput::TRIANGLES;
+		for (PxU32 i = 0; i < nbTriangles; i++)
+		{
+			if (heightfield->isValidTriangle(i) && heightfield->getTriangleMaterial(i) != PxHeightFieldMaterial::eHOLE)
+			{
+				PxU32 vi0, vi1, vi2;
+				heightfield->getTriangleVertexIndices(i, vi0, vi1, vi2);
+				const PxVec3& vw0 = tmpVerts[vi0];
+				const PxVec3& vw1 = tmpVerts[vi1];
+				const PxVec3& vw2 = tmpVerts[vi2];
+
+				out << vw0 << vw1 << vw2;
 			}
 		}
 		PX_FREE(tmpVerts);

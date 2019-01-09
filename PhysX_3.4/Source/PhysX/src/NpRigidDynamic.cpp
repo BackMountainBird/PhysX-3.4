@@ -315,6 +315,38 @@ void NpRigidDynamic::clearTorque(PxForceMode::Enum mode)
 }
 
 
+PxVec3 NpRigidDynamic::getLinearAcceleration()
+{
+	PxVec3 res(0.0f);
+	mBody.getSpatialAcceleration(&res, nullptr);
+	return res;
+}
+
+
+PxVec3 NpRigidDynamic::getLinearAccumulator()
+{
+	PxVec3 res(0.0f);
+	mBody.getSpatialVelocity(&res, nullptr);
+	return res;
+}
+
+
+PxVec3 NpRigidDynamic::getAngularAcceleration()
+{
+	PxVec3 res(0.0f);
+	mBody.getSpatialAcceleration(nullptr, &res);
+	return res;
+}
+
+
+PxVec3 NpRigidDynamic::getAngularAccumulator()
+{
+	PxVec3 res(0.0f);
+	mBody.getSpatialVelocity(nullptr, &res);
+	return res;
+}
+
+
 bool NpRigidDynamic::isSleeping() const
 {
 	NP_READ_CHECK(NpActor::getOwnerScene(*this));

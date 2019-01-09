@@ -40,6 +40,8 @@ namespace physx
 namespace shdfnd
 {
 
+#define AUTO_RELEASE_SLAB_NUM	50
+
 /*!
 Simple allocation pool
 */
@@ -49,7 +51,7 @@ class PoolBase : public UserAllocated, public Alloc
 	PX_NOCOPY(PoolBase)
   protected:
 	PoolBase(const Alloc& alloc, uint32_t elementsPerSlab, uint32_t slabSize)
-	: Alloc(alloc), mSlabs(alloc), mElementsPerSlab(elementsPerSlab), mUsed(0), mSlabSize(slabSize), mFreeElement(0)
+	: Alloc(alloc), mSlabs(alloc), mElementsPerSlab(elementsPerSlab), mUsed(0), mUnReleasedFree(0), mSlabSize(slabSize), mFreeElement(0)
 	{
 		PX_COMPILE_TIME_ASSERT(sizeof(T) >= sizeof(size_t));
 	}
@@ -72,6 +74,7 @@ class PoolBase : public UserAllocated, public Alloc
 		T* p = reinterpret_cast<T*>(mFreeElement);
 		mFreeElement = mFreeElement->mNext;
 		mUsed++;
+		mUnReleasedFree--;
 /**
 Mark a specified amount of memory with 0xcd pattern. This is used to check that the meta data
 definition for serialized classes is complete in checked builds.
@@ -91,6 +94,12 @@ definition for serialized classes is complete in checked builds.
 			PX_ASSERT(mUsed);
 			mUsed--;
 			push(reinterpret_cast<FreeList*>(p));
+		}
+
+		if (mUnReleasedFree > (int32_t)(AUTO_RELEASE_SLAB_NUM * mElementsPerSlab))
+		{
+			releaseEmptySlabs();
+			mUnReleasedFree = 0;
 		}
 	}
 
@@ -162,6 +171,7 @@ definition for serialized classes is complete in checked builds.
 
 	uint32_t mElementsPerSlab;
 	uint32_t mUsed;
+	int32_t  mUnReleasedFree;
 	uint32_t mSlabSize;
 
 	FreeList* mFreeElement; // Head of free-list
@@ -172,6 +182,7 @@ definition for serialized classes is complete in checked builds.
 	{
 		p->mNext = mFreeElement;
 		mFreeElement = p;
+		mUnReleasedFree++;
 	}
 
 	// Allocate a slab and segregate it into the freelist
@@ -247,7 +258,7 @@ definition for serialized classes is complete in checked builds.
 					freeIt++;
 				}
 
-				if(*slabIt == (*freeIt)) // the slab's first element in freeList
+				if((*slabIt == (*freeIt)) && (freeIt < lastCheck)) // the slab's first element in freeList
 				{
 					const size_t endSlabAddress = size_t(*slabIt) + mSlabSize;
 					const size_t endFreeAddress = size_t(*(freeIt + mElementsPerSlab - 1));

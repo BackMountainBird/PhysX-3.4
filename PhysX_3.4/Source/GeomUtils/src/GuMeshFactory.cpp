@@ -27,7 +27,6 @@
 // Copyright (c) 2004-2008 AGEIA Technologies, Inc. All rights reserved.
 // Copyright (c) 2001-2004 NovodeX AG. All rights reserved.  
 
-
 #include "PsIntrinsics.h"
 #include "GuMeshFactory.h"
 #include "PxHeightFieldDesc.h"
@@ -52,12 +51,11 @@ using namespace Gu;
 
 // PT: TODO: refactor all this with a dedicated container
 
-GuMeshFactory::GuMeshFactory()
-: mTriangleMeshes (PX_DEBUG_EXP("mesh factory triangle mesh hash"))
-, mConvexMeshes (PX_DEBUG_EXP("mesh factory convex mesh hash"))
-, mHeightFields (PX_DEBUG_EXP("mesh factory height field hash"))
-, mFactoryListeners(PX_DEBUG_EXP("FactoryListeners"))
-
+GuMeshFactory::GuMeshFactory() :
+	mTriangleMeshes		(PX_DEBUG_EXP("mesh factory triangle mesh hash")),
+	mConvexMeshes		(PX_DEBUG_EXP("mesh factory convex mesh hash")),
+	mHeightFields		(PX_DEBUG_EXP("mesh factory height field hash")),
+	mFactoryListeners	(PX_DEBUG_EXP("FactoryListeners"))
 {
 }
 
@@ -98,29 +96,19 @@ void GuMeshFactory::release()
 	PX_DELETE(this);
 }
 
-namespace
+template <typename T>
+static void addToHash(Ps::CoalescedHashSet<T*>& hash, T* element, Ps::Mutex* mutex)
 {
-	template<typename TDataType>
-	inline void notifyReleaseFactoryItem( Ps::Array<GuMeshFactoryListener*>& listeners, const TDataType* type, PxType typeID)
-	{
-		PxU32 numListeners = listeners.size();
-		for ( PxU32 idx = 0; idx < numListeners; ++idx )
-			listeners[idx]->onGuMeshFactoryBufferRelease( type, typeID);
-	}
+	if(!element)
+		return;
 
-	template <typename T> void addToHash(Ps::CoalescedHashSet<T*>& hash, T* element, Ps::Mutex* mutex)
-	{
-		if(!element)
-			return;
+	if(mutex)
+		mutex->lock();
 
-		if(mutex)
-			mutex->lock();
+	hash.insert(element);
 
-		hash.insert(element);
-
-		if(mutex)
-			mutex->unlock();
-	}
+	if(mutex)
+		mutex->unlock();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -322,7 +310,7 @@ static TriangleMeshData* loadMeshData(PxInputStream& stream)
 	// PT: TODO better
 	if(midphaseID==PxMeshMidPhase::eBVH33)
 	{
-		if(!static_cast<RTreeTriangleData*>(data)->mRTree.load(stream, version))
+		if(!static_cast<RTreeTriangleData*>(data)->mRTree.load(stream, version, mismatch))
 		{
 			Ps::getFoundation().error(PxErrorCode::eINTERNAL_ERROR, __FILE__, __LINE__, "RTree binary image load error.");
 			PX_DELETE(data);
@@ -332,7 +320,7 @@ static TriangleMeshData* loadMeshData(PxInputStream& stream)
 	else if(midphaseID==PxMeshMidPhase::eBVH34)
 	{
 		BV4TriangleData* bv4data = static_cast<BV4TriangleData*>(data);
-		if(!bv4data->mBV4Tree.load(stream, version))
+		if(!bv4data->mBV4Tree.load(stream, mismatch))
 		{
 			Ps::getFoundation().error(PxErrorCode::eINTERNAL_ERROR, __FILE__, __LINE__, "BV4 binary image load error.");
 			PX_DELETE(data);
@@ -350,13 +338,8 @@ static TriangleMeshData* loadMeshData(PxInputStream& stream)
 	else PX_ASSERT(0);
 
 	// Import local bounds
-	data->mGeomEpsilon		= readFloat(mismatch, stream);
-	data->mAABB.minimum.x	= readFloat(mismatch, stream);
-	data->mAABB.minimum.y	= readFloat(mismatch, stream);
-	data->mAABB.minimum.z	= readFloat(mismatch, stream);
-	data->mAABB.maximum.x	= readFloat(mismatch, stream);
-	data->mAABB.maximum.y	= readFloat(mismatch, stream);
-	data->mAABB.maximum.z	= readFloat(mismatch, stream);
+	data->mGeomEpsilon = readFloat(mismatch, stream);
+	readFloatBuffer(&data->mAABB.minimum.x, 6, mismatch, stream);
 
 	PxU32 nb = readDword(mismatch, stream);
 	if(nb)
@@ -483,7 +466,7 @@ static TriangleMeshData* loadMeshData(PxInputStream& stream)
 		//read BV32
 		data->mGRB_BV32Tree = PX_NEW(BV32Tree);
 		BV32Tree* bv32Tree = static_cast<BV32Tree*>(data->mGRB_BV32Tree);
-		if (!bv32Tree->load(stream, version))
+		if (!bv32Tree->load(stream, mismatch))
 		{
 			Ps::getFoundation().error(PxErrorCode::eINTERNAL_ERROR, __FILE__, __LINE__, "BV32 binary image load error.");
 			PX_DELETE(data);
@@ -680,7 +663,9 @@ void GuMeshFactory::removeFactoryListener( GuMeshFactoryListener& listener )
 
 void GuMeshFactory::notifyFactoryListener(const PxBase* base, PxType typeID)
 {
-	notifyReleaseFactoryItem(mFactoryListeners, base, typeID);
+	const PxU32 nbListeners = mFactoryListeners.size();
+	for(PxU32 i=0; i<nbListeners; i++)
+		mFactoryListeners[i]->onGuMeshFactoryBufferRelease(base, typeID);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

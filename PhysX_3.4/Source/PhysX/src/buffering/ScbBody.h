@@ -194,8 +194,10 @@ public:
 
 	PX_INLINE		void				addSpatialAcceleration(const PxVec3* linAcc, const PxVec3* angAcc);
 	PX_INLINE		void				clearSpatialAcceleration(bool force, bool torque);
+	PX_INLINE		void				getSpatialAcceleration(PxVec3* linAcc, PxVec3* angAcc);
 	PX_INLINE		void				addSpatialVelocity(const PxVec3* linVelDelta, const PxVec3* angVelDelta);
 	PX_INLINE		void				clearSpatialVelocity(bool force, bool torque);
+	PX_INLINE		void				getSpatialVelocity(PxVec3* linVelDelta, PxVec3* angVelDelta);
 
 	PX_INLINE		bool				getKinematicTarget(PxTransform& p) const;
 	PX_INLINE		void				setKinematicTarget(const PxTransform& p);
@@ -542,6 +544,26 @@ PX_INLINE void Body::clearSpatialAcceleration(bool force, bool torque)
 	}
 }
 
+PX_INLINE void Body::getSpatialAcceleration(PxVec3* linAcc, PxVec3* angAcc)
+{
+	if (linAcc)
+		*linAcc = PxVec3(0.0f);
+	if (angAcc)
+		*angAcc = PxVec3(0.0f);
+	if (!isBuffering())
+	{
+		mBodyCore.getSpatialAcceleration(linAcc, angAcc);
+	}
+	else
+	{
+		Buf* b = getBodyBuffer();
+		if (linAcc)
+			*linAcc = b->mLinAcceleration;
+		if (angAcc)
+			*angAcc = b->mAngAcceleration;
+	}
+}
+
 PX_INLINE void Body::addSpatialVelocity(const PxVec3* linVelDelta, const PxVec3* angVelDelta)
 {
 	if(!isBuffering())
@@ -567,6 +589,26 @@ PX_INLINE void Body::clearSpatialVelocity(bool force, bool torque)
 	{
 		Buf* b = getBodyBuffer();
 		resetAccumulator(b->mLinDeltaVelocity, b->mAngDeltaVelocity, Buf::BF_DeltaVelocityLinear, Buf::BF_DeltaVelocityAngular, Buf::BF_ClearDeltaVelocityLinear, Buf::BF_ClearDeltaVelocityAngular, force, torque);
+	}
+}
+
+PX_INLINE void Body::getSpatialVelocity(PxVec3* linVelDelta, PxVec3* angVelDelta)
+{
+	if (linVelDelta)
+		*linVelDelta = PxVec3(0.0f);
+	if (angVelDelta)
+		*angVelDelta = PxVec3(0.0f);
+	if (!isBuffering())
+	{
+		mBodyCore.getSpatialVelocity(linVelDelta, angVelDelta);
+	}
+	else
+	{
+		Buf* b = getBodyBuffer();
+		if (linVelDelta)
+			*linVelDelta = b->mLinDeltaVelocity;
+		if (angVelDelta)
+			*angVelDelta = b->mAngDeltaVelocity;
 	}
 }
 

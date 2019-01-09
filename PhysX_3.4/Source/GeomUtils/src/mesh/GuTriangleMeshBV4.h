@@ -36,6 +36,13 @@ namespace physx
 {
 class GuMeshFactory;
 
+// Bleston:
+namespace Gu
+{
+	class BV4TriangleMesh;
+}
+void cloneBV4TriangleMesh(Gu::BV4TriangleMesh* clone, Gu::BV4TriangleMesh* orig);
+
 namespace Gu
 {
 
@@ -63,6 +70,9 @@ class BV4TriangleMesh : public TriangleMesh
 	private:
 								Gu::SourceMesh			mMeshInterface;
 								Gu::BV4Tree				mBV4Tree;
+								
+								// Bleston:
+								friend void physx::cloneBV4TriangleMesh(Gu::BV4TriangleMesh* clone, Gu::BV4TriangleMesh* orig);
 };
 
 #if PX_VC

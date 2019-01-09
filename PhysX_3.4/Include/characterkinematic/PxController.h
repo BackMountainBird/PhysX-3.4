@@ -67,6 +67,13 @@ struct PxControllerShapeType
 		*/
 		eCAPSULE,
 
+		/**
+		\brief A rotatable controller
+
+		@see PxRotatableController PxRotatableControllerDesc
+		*/
+		eROTATABLE,
+
 		eFORCE_DWORD = 0x7fffffff
 	};
 };
@@ -97,6 +104,21 @@ struct PxControllerNonWalkableMode
 };
 
 /**
+\brief specifies the optimize option of CCT
+*/
+struct PxControllerOptimizeFlag
+{
+	enum Enum
+	{
+		eOPTIMIZE_NONE = 0,
+		eOPTIMIZE_RAYCAST = (1 << 0),						//!< Use raycast instead of sweep.
+
+		eOPTIMIZE_MAXCNT = (1 << 7)
+	};
+};
+typedef PxFlags<PxControllerOptimizeFlag::Enum, PxU8> PxControllerOptimizeFlags;
+
+/**
 \brief specifies which sides a character is colliding with.
 */
 struct PxControllerCollisionFlag
@@ -105,7 +127,8 @@ struct PxControllerCollisionFlag
 	{
 		eCOLLISION_SIDES	= (1<<0),	//!< Character is colliding to the sides.
 		eCOLLISION_UP		= (1<<1),	//!< Character has collision above.
-		eCOLLISION_DOWN		= (1<<2)	//!< Character has collision below.
+		eCOLLISION_DOWN		= (1<<2),	//!< Character has collision below.
+		eCOLLISION_ROT		= (1<<3)	//!< Character has collision rotation.
 	};
 };
 
@@ -124,6 +147,7 @@ PX_FLAGS_OPERATORS(PxControllerCollisionFlag::Enum, PxU8)
 struct PxControllerState
 {
 	PxVec3			deltaXP;			//!< delta position vector for the object the CCT is standing/riding on. Not always match the CCT delta when variable timesteps are used.
+	PxVec3			touchedPosShapeLocal; // The touched pos in shape's local frame
 	PxShape*		touchedShape;		//!< Shape on which the CCT is standing
 	PxRigidActor*	touchedActor;		//!< Actor owning 'touchedShape'
 	ObstacleHandle	touchedObstacleHandle;	// Obstacle on which the CCT is standing
@@ -601,7 +625,8 @@ PX_INLINE PxControllerDesc::~PxControllerDesc()
 PX_INLINE bool PxControllerDesc::isValid() const
 {
 	if(		mType!=PxControllerShapeType::eBOX
-		&&	mType!=PxControllerShapeType::eCAPSULE)
+		&&	mType!=PxControllerShapeType::eCAPSULE
+		&&	mType!=PxControllerShapeType::eROTATABLE)
 		return false;
 	if(scaleCoeff<0.0f)		return false;
 	if(volumeGrowth<1.0f)	return false;
@@ -661,6 +686,20 @@ public:
 	\return Collision flags, collection of ::PxControllerCollisionFlags
 	*/
 	virtual		PxControllerCollisionFlags	move(const PxVec3& disp, PxF32 minDist, PxF32 elapsedTime, const PxControllerFilters& filters, const PxObstacleContext* obstacles=NULL) = 0;
+
+	/**
+	\brief Moves the character using a "collide-and-slide" algorithm.
+
+	\param[in] disp	Displacement vector
+	\param[in] minDist The minimum travelled distance to consider. If travelled distance is smaller, the character doesn't move.
+	This is used to stop the recursive motion algorithm when remaining distance to travel is small.
+	\param[in] rotAngle Yaw rotation radius
+	\param[in] elapsedTime Time elapsed since last call
+	\param[in] filters User-defined filters for this move
+	\param[in] obstacles Potential additional obstacles the CCT should collide with.
+	\return Collision flags, collection of ::PxControllerCollisionFlags
+	*/
+	virtual		PxControllerCollisionFlags	moveWithRotate(const PxVec3& disp, PxF32 minDist, PxF32 rotAngle, PxF32 elapsedTime, const PxControllerFilters& filters, const PxObstacleContext* obstacles = NULL) = 0;
 
 	/**
 	\brief Sets controller's position.
@@ -826,6 +865,10 @@ public:
 	*/
 	virtual	    void					setSlopeLimit(PxF32 slopeLimit)					=0;
 
+	virtual	    PxControllerOptimizeFlags	getOptimizeFlag()						const		=0;
+
+	virtual	    void						setOptimizeFlag(PxControllerOptimizeFlags flags)	=0;
+
 	/**
 	\brief Flushes internal geometry cache.
 	
@@ -897,6 +940,11 @@ public:
 	\param[in] height Desired controller's height
 	*/
 	virtual		void					resize(PxReal height)	= 0;
+
+	virtual		void					setNewCollision(bool val) = 0;
+	virtual		bool					getNewCollision(bool val) const = 0;
+	virtual		void					setNewCollisionFriction(PxReal val) = 0;
+	virtual		PxReal					getNewCollisionFriction() const = 0;
 
 protected:
 	PX_INLINE							PxController()					{}

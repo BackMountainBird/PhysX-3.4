@@ -71,6 +71,16 @@ Compiler defines, see http://sourceforge.net/p/predef/wiki/Compilers/
 #endif
 
 /**
+Hardcode to avoid messiah build tool's hardcode for _M_ARM
+by Bleston
+*/
+#if defined(PX_VC) && defined(_M_ARM)
+#define PX_M_ARM
+#elif defined(PX_M_ARM)
+#undef PX_M_ARM
+#endif
+
+/**
 Operating system defines, see http://sourceforge.net/p/predef/wiki/OperatingSystems/
 */
 #if defined(_XBOX_ONE)
@@ -104,7 +114,7 @@ Architecture defines, see http://sourceforge.net/p/predef/wiki/Architectures/
 #define PX_X86 1
 #elif defined(__arm64__) || defined(__aarch64__)
 #define PX_A64 1
-#elif defined(__arm__) || defined(_M_ARM)
+#elif defined(__arm__) || defined(PX_M_ARM)
 #define PX_ARM 1
 #elif defined(__ppc__) || defined(_M_PPC) || defined(__CELLOS_LV2__)
 #define PX_PPC 1
@@ -119,7 +129,7 @@ SIMD defines
 #if defined(__i386__) || defined(_M_IX86) || defined(__x86_64__) || defined(_M_X64) || (defined (__EMSCRIPTEN__) && defined(__SSE2__))
 #define PX_SSE2 1
 #endif
-#if defined(_M_ARM) || defined(__ARM_NEON__) || defined(__ARM_NEON)
+#if defined(PX_M_ARM) || defined(__ARM_NEON__) || defined(__ARM_NEON)
 #define PX_NEON 1
 #endif
 #if defined(_M_PPC) || defined(__CELLOS_LV2__)

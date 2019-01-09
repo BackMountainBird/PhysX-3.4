@@ -81,6 +81,7 @@ Controller::Controller(const PxControllerDesc& desc, PxScene* s) :
 	mRegisterDeletionListener			= desc.registerDeletionListener;
 
 	mDeltaXP							= PxVec3(0);
+	mDeltaOrient						= 0.0f;
 	mOverlapRecover						= PxVec3(0);	
 
 	mUserParams.mUpDirection = PxVec3(0.0f);
@@ -156,6 +157,7 @@ void Controller::getInternalState(PxControllerState& state) const
 		mWriteLock.lock();
 
 	state.deltaXP				= mDeltaXP;
+	state.touchedPosShapeLocal	= mCctModule.mTouchedPosShape_Local;
 	state.touchedShape			= const_cast<PxShape*>(mCctModule.mTouchedShape.get());
 	state.touchedActor			= const_cast<PxRigidActor*>(mCctModule.mTouchedActor.get());
 	state.touchedObstacleHandle	= mCctModule.mTouchedObstacleHandle;

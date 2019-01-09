@@ -178,6 +178,43 @@ public:
 							const PxU32* cachedIndex = NULL,
 							const PxReal inflation = 0.0f,
 							bool doubleSided = false);
+
+	/**
+	\brief Raycast with a set of given triangles.
+
+	This function simply raycast against each input triangle. This is an O(N) operation with N = number of input triangles.
+	It does not use any particular acceleration structure.
+
+	\param[in] rayOrig The original of the ray.
+	\param[in] rayNormDir The normalised direction of ray.
+	\param[in] distance Raycast distance. Needs to be larger than 0. Clamped to PX_MAX_SWEEP_DISTANCE.
+	\param[in] triangleCount Number of specified triangles
+	\param[in] triangles Array of triangles to sweep against
+	\param[out] raycastHit The raycast hit information. See the notes below for limitations about returned results.
+	\param[in] hintFlags Specification of the kind of information to retrieve on hit. Combination of #PxHitFlag flags. See the notes below for limitations about supported flags.
+	\param[in] cachedIndex Cached triangle index for subsequent calls. Cached triangle is tested first. Optional parameter.
+	\param[in] inflation This parameter creates a skin around the swept geometry which increases its extents for sweeping. The sweep will register a hit as soon as the skin touches a shape, and will return the corresponding distance and normal.
+	\param[in] doubleSided Counterpart of PxMeshGeometryFlag::eDOUBLE_SIDED for input triangles.
+	\return True if the raycast hits the specified triangles
+
+	\note This function returns a single closest hit across all the input triangles. Multiple hits are not supported.
+	\note Only PxHitFlag::eASSUME_NO_INITIAL_OVERLAP and PxHitFlag::eMESH_BOTH_SIDES are supported in hintFlags.
+	\note Unlike scene queries the validity flags in raycastHit are not set by this call and only eDISTANCE and eNORMAL fields are always defined.
+	\note ePOSITION is only defined when there is no initial overlap (raycastHit.hadInitialOverlap() == false)
+	\note The returned PxRaycastHit::faceIndex parameter will hold the index of the hit triangle in input array, i.e. the range is [0; triangleCount). For initially overlapping sweeps, this is the index of overlapping triangle.
+	\note The returned PxRaycastHit::actor and PxSweepHit::shape pointers are not filled.
+
+	*/
+	PX_PHYSX_COMMON_API static bool raycast(const PxVec3& rayOrig,
+		const PxVec3& rayNormDir,
+		const PxReal distance,
+		PxU32 triangleCount,
+		const PxTriangle* trangles,
+		PxRaycastHit& raycastHit,
+		PxHitFlags hintFlags = PxHitFlag::eDEFAULT,
+		const PxU32* cachedIndex = nullptr,
+		const PxReal inflation = 0.0f,
+		bool doubleSided = false);
 };
 
 

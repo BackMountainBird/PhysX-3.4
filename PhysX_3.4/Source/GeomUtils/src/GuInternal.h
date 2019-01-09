@@ -44,6 +44,7 @@ namespace physx
 namespace Gu
 {
 	class Box;
+	class Cylinder;
 
 	// PT: TODO: now that the Gu files are not exposed to users anymore, we should move back capsule-related functions
 	// to GuCapsule.h, etc
@@ -54,6 +55,8 @@ namespace Gu
 	PX_PHYSX_COMMON_API void		computeBoundsAroundVertices(PxBounds3& bounds, PxU32 nbVerts, const PxVec3* PX_RESTRICT verts);
 
 						void		computeBoxAroundCapsule(const Capsule& capsule, Box& box);
+
+	PX_PHYSX_COMMON_API void		computeBoxAroundCylinder(const Cylinder& capsule, Box& box);
 
 						PxPlane		getPlane(const PxTransform& pose);
 

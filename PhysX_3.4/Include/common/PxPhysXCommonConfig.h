@@ -36,11 +36,11 @@
 
 #include "foundation/Px.h"
 
-/*Temporary disable support for VS2017 for windows platform, as we wait for compiler fix:
+/*Disable support for VS2017 prior version 15.5.1 for windows platform, because of a compiler bug:
 https://developercommunity.visualstudio.com/content/problem/66047/possible-compiler-bug.html
 */
-#if (PX_VC == 15) && PX_WINDOWS
-#error Visual studio 2017 is not supported because of a compiler bug, support will be enabled once a fix is out.
+#if (PX_VC == 15) && PX_WINDOWS && (_MSC_FULL_VER < 191225830)
+#error Visual studio 2017 prior to 15.5.1 is not supported because of a compiler bug.
 #endif
 
 // define API function declaration (public API only needed because of extensions)
@@ -79,17 +79,21 @@ https://developercommunity.visualstudio.com/content/problem/66047/possible-compi
 #define PX_PHYSX_GPU_API
 #endif // PX_SUPPORT_GPU_PHYSX
 
-#if PX_WINDOWS && !defined(__CUDACC__)
-	#if defined PX_PHYSX_COMMON_EXPORTS
-		#define PX_PHYSX_COMMON_API __declspec(dllexport)
-	#else
-		#define PX_PHYSX_COMMON_API __declspec(dllimport)
-	#endif
-#elif PX_UNIX_FAMILY
-	#define PX_PHYSX_COMMON_API PX_UNIX_EXPORT
-#else
+#if defined PX_PHYSX_STATIC_LIB || defined PX_PHYSX_CORE_STATIC_LIB
 	#define PX_PHYSX_COMMON_API
-#endif
+#else // PX_PHYSX_STATIC_LIB
+	#if PX_WINDOWS && !defined(__CUDACC__)
+		#if defined PX_PHYSX_COMMON_EXPORTS
+			#define PX_PHYSX_COMMON_API __declspec(dllexport)
+		#else
+			#define PX_PHYSX_COMMON_API __declspec(dllimport)
+		#endif
+	#elif PX_UNIX_FAMILY
+		#define PX_PHYSX_COMMON_API PX_UNIX_EXPORT
+	#else
+		#define PX_PHYSX_COMMON_API
+	#endif
+#endif // PX_PHYSX_STATIC_LIB
 
 // Changing these parameters requires recompilation of the SDK
 

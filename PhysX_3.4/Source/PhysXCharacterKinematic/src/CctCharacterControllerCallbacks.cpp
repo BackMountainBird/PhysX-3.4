@@ -243,7 +243,7 @@ static void outputPlaneToStream(PxShape* planeShape, const PxRigidActor* actor, 
 	TouchedTriangles[1].verts[1] = p2 + offset;
 	TouchedTriangles[1].verts[2] = p3 + offset;
 
-	if(gVisualizeTouchedTris)
+	if(gVisualizeTouchedTris && worldTriangles.size()>0)
 		visualizeTouchedTriangles(touchedMesh->mNbTris, touchedMesh->mIndexWorldTriangles, &worldTriangles.getTriangle(0), renderBuffer, offset, params.mUpDirection);
 }
 
@@ -622,7 +622,7 @@ static void outputMeshToStream(	PxShape* meshShape, const PxRigidActor* actor, c
 		}
 	}
 
-	if(gVisualizeTouchedTris)
+	if(gVisualizeTouchedTris && worldTriangles.size()>0)
 		visualizeTouchedTriangles(touchedMesh->mNbTris, touchedMesh->mIndexWorldTriangles, &worldTriangles.getTriangle(0), renderBuffer, offset, params.mUpDirection);
 }
 
@@ -762,7 +762,7 @@ static void outputHeightFieldToStream(	PxShape* hfShape, const PxRigidActor* act
 		}
 	}
 
-	if(gVisualizeTouchedTris)
+	if(gVisualizeTouchedTris && worldTriangles.size()>0)
 		visualizeTouchedTriangles(touchedMesh->mNbTris, touchedMesh->mIndexWorldTriangles, &worldTriangles.getTriangle(0), renderBuffer, offset, params.mUpDirection);
 }
 
@@ -890,7 +890,7 @@ static void outputConvexToStream(PxShape* convexShape, const PxRigidActor* actor
 			triIndicesArray.pushBack(PX_INVALID_U32);
 		}
 	}
-	if(gVisualizeTouchedTris)
+	if(gVisualizeTouchedTris && worldTriangles.size()>0)
 		visualizeTouchedTriangles(touchedMesh->mNbTris, touchedMesh->mIndexWorldTriangles, &worldTriangles.getTriangle(0), renderBuffer, offset, params.mUpDirection);
 }
 

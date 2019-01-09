@@ -225,7 +225,7 @@ namespace Sc
 	// PT: TODO: revisit the need for a virtual interface
 	struct SqBoundsSync
 	{
-		virtual void sync(const Sq::PrunerHandle* handles, const PxU32* indices, const PxBounds3* bounds, PxU32 count) = 0;
+		virtual void sync(const Sq::PrunerHandle* handles, const PxU32* indices, const PxBounds3* bounds, PxU32 count, const Cm::BitMap& dirtyShapeSimMap) = 0;
 
 		virtual ~SqBoundsSync() {}
 	};
@@ -687,7 +687,7 @@ namespace Sc
 					void						processNarrowPhaseLostTouchEventsIslands(PxBaseTask*);
 					void						processLostTouchPairs();
 					void						integrateKinematicPose();
-					void						updateKinematicCached();
+					void						updateKinematicCached(PxBaseTask*);
 
 					void						beforeSolver(PxBaseTask* continuation);
 					void						checkForceThresholdContactEvents(const PxU32 ccdPass);

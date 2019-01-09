@@ -264,6 +264,34 @@ void NpArticulationLink::setGlobalPose(const PxTransform& pose)
 	setGlobalPose(pose, true);
 }
 
+PxVec3 NpArticulationLink::getLinearAcceleration()
+{
+	PxVec3 res(0.0f);
+	mBody.getSpatialAcceleration(&res, nullptr);
+	return res;
+}
+
+PxVec3 NpArticulationLink::getLinearAccumulator()
+{
+	PxVec3 res(0.0f);
+	mBody.getSpatialVelocity(&res, nullptr);
+	return res;
+}
+
+PxVec3 NpArticulationLink::getAngularAcceleration()
+{
+	PxVec3 res(0.0f);
+	mBody.getSpatialAcceleration(nullptr, &res);
+	return res;
+}
+
+PxVec3 NpArticulationLink::getAngularAccumulator()
+{
+	PxVec3 res(0.0f);
+	mBody.getSpatialVelocity(nullptr, &res);
+	return res;
+}
+
 void NpArticulationLink::setGlobalPose(const PxTransform& pose, bool autowake)
 {
 	NpScene* scene = NpActor::getOwnerScene(*this);

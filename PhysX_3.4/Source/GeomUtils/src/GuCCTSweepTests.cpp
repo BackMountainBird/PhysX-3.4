@@ -244,10 +244,17 @@ static bool sweepBoxVsTriangles(PxU32 nbTris, const PxTriangle* triangles, const
 		+	PxAbs(dir.y) * box.extents.y
 		+	PxAbs(dir.z) * box.extents.z;*/
 
+// Bleston : the following calculating boxRadius is wrong.
+//float boxRadius =
+//			PxAbs(localDir.x) * box.extents.x
+//		+	PxAbs(localDir.y) * box.extents.y
+//		+	PxAbs(localDir.z) * box.extents.z;
+
+// Bleston : this boxRadius is safe. Althought it may be a little large.
 float boxRadius =
-			PxAbs(localDir.x) * box.extents.x
-		+	PxAbs(localDir.y) * box.extents.y
-		+	PxAbs(localDir.z) * box.extents.z;
+		PxAbs(localDir.x * box.extents.x)
+		+ PxAbs(localDir.y * box.extents.y)
+		+ PxAbs(localDir.z * box.extents.z);
 
 if(gValidateBoxRadiusComputation)	// PT: run this to check the box radius is correctly computed
 {

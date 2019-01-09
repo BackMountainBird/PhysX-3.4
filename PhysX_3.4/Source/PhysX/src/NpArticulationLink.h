@@ -120,6 +120,11 @@ public:
 	virtual		void				clearForce(PxForceMode::Enum mode = PxForceMode::eFORCE);
 	virtual		void				clearTorque(PxForceMode::Enum mode = PxForceMode::eFORCE);
 
+	virtual		PxVec3				getLinearAcceleration()	override;
+	virtual		PxVec3				getLinearAccumulator() override;
+	virtual		PxVec3				getAngularAcceleration() override;
+	virtual		PxVec3				getAngularAccumulator() override;
+
 	//---------------------------------------------------------------------------------
 	// Miscellaneous
 	//---------------------------------------------------------------------------------

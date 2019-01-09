@@ -182,7 +182,7 @@ Sc::ElementSimInteraction* Sc::NPhaseCore::findInteraction(ElementSim* _element0
 	return NULL;
 }
 
-PxFilterInfo Sc::NPhaseCore::onOverlapFilter(ElementSim* volume0, ElementSim* volume1, Bp::BroadPhasePair* pair)
+PxFilterInfo Sc::NPhaseCore::onOverlapFilter(ElementSim* volume0, ElementSim* volume1)
 {
 	PX_ASSERT(!findInteraction(volume0, volume1));
 
@@ -196,11 +196,7 @@ PxFilterInfo Sc::NPhaseCore::onOverlapFilter(ElementSim* volume0, ElementSim* vo
 		return finfo;
 	}*/
 
-	if(pair)
-		pair->mUserData = NULL;	
-
 	PX_ASSERT(PxMax(volume0->getElementType(), volume1->getElementType()) == ElementType::eSHAPE);
-
 
 	ShapeSim* s0 = static_cast<ShapeSim*>(volume1);
 	ShapeSim* s1 = static_cast<ShapeSim*>(volume0);
@@ -214,7 +210,7 @@ PxFilterInfo Sc::NPhaseCore::onOverlapFilter(ElementSim* volume0, ElementSim* vo
 	return finfo;
 }
 
-Sc::Interaction* Sc::NPhaseCore::onOverlapCreated(ElementSim* volume0, ElementSim* volume1, const PxU32 ccdPass, Bp::BroadPhasePair* pair)
+Sc::Interaction* Sc::NPhaseCore::onOverlapCreated(ElementSim* volume0, ElementSim* volume1, const PxU32 ccdPass)
 {
 #if PX_USE_PARTICLE_SYSTEM_API
 	PX_COMPILE_TIME_ASSERT(ElementType::eSHAPE < ElementType::ePARTICLE_PACKET);
@@ -237,9 +233,6 @@ Sc::Interaction* Sc::NPhaseCore::onOverlapCreated(ElementSim* volume0, ElementSi
 		volumeLo = volume1;
 		volumeHi = volume0;
 	}
-
-	if(pair)
-		pair->mUserData = NULL;	
 
 	switch (volumeHi->getElementType())
 	{
@@ -341,11 +334,7 @@ Sc::Interaction* Sc::NPhaseCore::onOverlapCreated(ElementSim* volume0, ElementSi
 				// No actor internal interactions
 				PX_ASSERT(&shapeHi->getActor() != &shapeLo->getActor());
 
-				Sc::ElementSimInteraction* interaction = createRbElementInteraction(*shapeHi, *shapeLo, NULL, NULL, NULL);
-				if(pair)
-					pair->mUserData = interaction;
-				
-				return interaction;
+				return createRbElementInteraction(*shapeHi, *shapeLo, NULL, NULL, NULL);
 			}
 		case ElementType::eCOUNT:
 			PX_ASSERT(0);
@@ -406,19 +395,14 @@ static PX_FORCE_INLINE void prefetchPairActorsCore(const ActorSim& a0, const Act
 	Ps::prefetchLine((reinterpret_cast<PxU8*>(ac1)) + 128);
 }
 
-static PX_FORCE_INLINE Sc::Interaction* processElementPair(Sc::NPhaseCore& nPhaseCore, const Bp::AABBOverlap& pair, const PxU32 ccdPass, Bp::BroadPhasePair* bpPairs)
+static PX_FORCE_INLINE Sc::Interaction* processElementPair(Sc::NPhaseCore& nPhaseCore, const Bp::AABBOverlap& pair, const PxU32 ccdPass)
 {
 	ElementSim* e0 = reinterpret_cast<ElementSim*>(pair.mUserData0);
 	ElementSim* e1 = reinterpret_cast<ElementSim*>(pair.mUserData1);
-
-	Bp::BroadPhasePair* thisPair = NULL;
-	if(pair.mPairHandle != BP_INVALID_BP_HANDLE && bpPairs != NULL)
-		thisPair = &bpPairs[pair.mPairHandle];
-
-	return nPhaseCore.onOverlapCreated(e0, e1, ccdPass, thisPair);
+	return nPhaseCore.onOverlapCreated(e0, e1, ccdPass);
 }
 
-void Sc::NPhaseCore::onOverlapCreated(const Bp::AABBOverlap* PX_RESTRICT pairs, PxU32 pairCount, const PxU32 ccdPass, Bp::BroadPhasePair* bpPairs)
+void Sc::NPhaseCore::onOverlapCreated(const Bp::AABBOverlap* PX_RESTRICT pairs, PxU32 pairCount, const PxU32 ccdPass)
 {
 #if PX_USE_PARTICLE_SYSTEM_API
 	PX_COMPILE_TIME_ASSERT(ElementType::eSHAPE < ElementType::ePARTICLE_PACKET);
@@ -446,7 +430,7 @@ void Sc::NPhaseCore::onOverlapCreated(const Bp::AABBOverlap* PX_RESTRICT pairs, 
 			// unrolling by hand leads to better perf on XBox
 		}
 
-		processElementPair(*this, pairs[pairIdx + 0], ccdPass, bpPairs);
+		processElementPair(*this, pairs[pairIdx + 0], ccdPass);
 
 		// prefetch actor sim for next batch
 		{
@@ -458,7 +442,7 @@ void Sc::NPhaseCore::onOverlapCreated(const Bp::AABBOverlap* PX_RESTRICT pairs, 
 			// unrolling by hand leads to better perf on XBox
 		}
 
-		processElementPair(*this, pairs[pairIdx + 1], ccdPass, bpPairs);
+		processElementPair(*this, pairs[pairIdx + 1], ccdPass);
 
 		// prefetch shape core for next batch
 		{
@@ -470,7 +454,7 @@ void Sc::NPhaseCore::onOverlapCreated(const Bp::AABBOverlap* PX_RESTRICT pairs, 
 			// unrolling by hand leads to better perf on XBox
 		}
 
-		processElementPair(*this, pairs[pairIdx + 2], ccdPass, bpPairs);
+		processElementPair(*this, pairs[pairIdx + 2], ccdPass);
 
 		// prefetch actor core for next batch
 		{
@@ -482,7 +466,7 @@ void Sc::NPhaseCore::onOverlapCreated(const Bp::AABBOverlap* PX_RESTRICT pairs, 
 			// unrolling by hand leads to better perf on XBox
 		}
 
-		processElementPair(*this, pairs[pairIdx + 3], ccdPass, bpPairs);
+		processElementPair(*this, pairs[pairIdx + 3], ccdPass);
 
 		pairIdx += prefetchLookAhead;
 	}
@@ -490,7 +474,7 @@ void Sc::NPhaseCore::onOverlapCreated(const Bp::AABBOverlap* PX_RESTRICT pairs, 
 	// process remaining pairs
 	for(PxU32 i=pairIdx; i < pairCount; i++)
 	{
-		processElementPair(*this, pairs[i], ccdPass, bpPairs);
+		processElementPair(*this, pairs[i], ccdPass);
 	}
 }
 
@@ -523,9 +507,6 @@ ElementSimInteraction* Sc::NPhaseCore::onOverlapRemovedStage1(ElementSim* volume
 
 void Sc::NPhaseCore::onOverlapRemoved(ElementSim* volume0, ElementSim* volume1, const PxU32 ccdPass, void* elemSim, PxsContactManagerOutputIterator& outputs, bool useAdaptiveForce)
 {
-	PX_UNUSED(elemSim);
-	// PT: ordering them here is again useless, as "findInteraction" will reorder according to counts...
-
 	ElementSim* elementHi = volume1;
 	ElementSim* elementLo = volume0;
 	// No actor internal interactions
@@ -1490,14 +1471,23 @@ Sc::ElementSimInteraction* Sc::NPhaseCore::convert(ElementSimInteraction* pair, 
 	ElementSim& elementA = pair->getElement0();
 	ElementSim& elementB = pair->getElement1();
 
-	ElementSimInteraction* result = NULL;
-
 	// Wake up the actors of the pair
 	if ((pair->getActor0().getActorType() == PxActorType::eRIGID_DYNAMIC) && !(static_cast<BodySim&>(pair->getActor0()).isActive()))
 		static_cast<BodySim&>(pair->getActor0()).internalWakeUp();
 	if ((pair->getActor1().getActorType() == PxActorType::eRIGID_DYNAMIC) && !(static_cast<BodySim&>(pair->getActor1()).isActive()))
 		static_cast<BodySim&>(pair->getActor1()).internalWakeUp();
 
+	// Since the FilterPair struct might have been re-used in the newly created interaction, we need to clear
+	// the filter pair marker of the old interaction to avoid that the FilterPair gets deleted by the releaseElementPair()
+	// call that follows.
+	pair->clearInteractionFlag(InteractionFlag::eIS_FILTER_PAIR);
+
+	// PT: we need to unregister the old interaction *before* creating the new one, because Sc::NPhaseCore::registerInteraction will use
+	// ElementSim pointers which are the same for both.
+	unregisterInteraction(pair);
+	releaseElementPair(pair, PairReleaseFlag::eWAKE_ON_LOST_TOUCH | PairReleaseFlag::eBP_VOLUME_REMOVED, 0, removeFromDirtyList, outputs, useAdaptiveForce);
+
+	ElementSimInteraction* result = NULL;
 	switch (newType)
 	{
 		case InteractionType::eINVALID:
@@ -1542,16 +1532,6 @@ Sc::ElementSimInteraction* Sc::NPhaseCore::convert(ElementSimInteraction* pair, 
 		mFilterPairManager->setPair(filterInfo.filterPairIndex, result, FilterPair::ELEMENT_ELEMENT);
 		result->setFilterPairIndex(filterInfo.filterPairIndex);
 	}
-
-	if (pair->readInteractionFlag(InteractionFlag::eIS_FILTER_PAIR))
-		pair->clearInteractionFlag(InteractionFlag::eIS_FILTER_PAIR);
-	// Since the FilterPair struct might have been re-used in the newly created interaction, we need to clear
-	// the filter pair marker of the old interaction to avoid that the FilterPair gets deleted by the releaseElementPair()
-	// call that follows.
-
-	unregisterInteraction(pair);
-
-	releaseElementPair(pair, PairReleaseFlag::eWAKE_ON_LOST_TOUCH | PairReleaseFlag::eBP_VOLUME_REMOVED, 0, removeFromDirtyList, outputs, useAdaptiveForce);
 
 	return result;
 }

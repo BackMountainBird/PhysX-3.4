@@ -16,6 +16,27 @@ OBJDUMP   = objdump
 OBJCOPY   = objcopy
 -include Makedefs.LINUX64.mk
 
+Global_custom_cflags = -Wno-unused-function
+
+LowLevel_custom_cflags					= Global_custom_cflags
+LowLevelAABB_custom_cflags				= Global_custom_cflags
+LowLevelCloth_custom_cflags				= Global_custom_cflags
+LowLevelDynamics_custom_cflags			= Global_custom_cflags
+LowLevelParticles_custom_cflags			= Global_custom_cflags
+PhysX_custom_cflags						= Global_custom_cflags
+PhysXCharacterKinematic_custom_cflags	= Global_custom_cflags
+PhysXCommon_custom_cflags				= Global_custom_cflags
+PhysXCooking_custom_cflags				= Global_custom_cflags
+PhysXExtensions_custom_cflags			= Global_custom_cflags
+PhysXCooking_custom_cflags				= Global_custom_cflags
+PhysXVehicle_custom_cflags				= Global_custom_cflags
+PsFastXml_custom_cflags					= Global_custom_cflags
+PxFoundation_custom_cflags				= Global_custom_cflags
+PxPvdSDK_custom_cflags					= Global_custom_cflags
+PxTask_custom_cflags					= Global_custom_cflags
+SceneQuery_custom_cflags				= Global_custom_cflags
+SimulationController_custom_cflags		= Global_custom_cflags
+
 all: checked debug profile release 
 
 checked: build_PxFoundation_checked build_PxPvdSDK_checked build_LowLevel_checked build_LowLevelAABB_checked build_LowLevelDynamics_checked build_LowLevelCloth_checked build_LowLevelParticles_checked build_PxTask_checked build_PsFastXml_checked build_PhysXVehicle_checked build_PhysXExtensions_checked build_SceneQuery_checked build_SimulationController_checked build_PhysXCommon_checked build_PhysX_checked build_PhysXCharacterKinematic_checked build_PhysXCooking_checked 

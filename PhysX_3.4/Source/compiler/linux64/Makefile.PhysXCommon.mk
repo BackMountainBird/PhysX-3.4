@@ -10,6 +10,7 @@ PhysXCommon_cppfiles   += ./../../Common/src/CmRadixSortBuffered.cpp
 PhysXCommon_cppfiles   += ./../../Common/src/CmRenderOutput.cpp
 PhysXCommon_cppfiles   += ./../../Common/src/CmVisualization.cpp
 PhysXCommon_cppfiles   += ./../../GeomUtils/src/GuBounds.cpp
+PhysXCommon_cppfiles   += ./../../GeomUtils/src/GuCylinder.cpp
 PhysXCommon_cppfiles   += ./../../GeomUtils/src/GuBox.cpp
 PhysXCommon_cppfiles   += ./../../GeomUtils/src/GuCCTSweepTests.cpp
 PhysXCommon_cppfiles   += ./../../GeomUtils/src/GuCapsule.cpp

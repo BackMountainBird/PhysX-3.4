@@ -324,6 +324,8 @@ bool physx::PxMeshQuery::raycast(const PxVec3& rayOrig,
 	raycastHit.distance = PX_MAX_SWEEP_DISTANCE;
 
 	PX_UNUSED(hintFlags);
+    PX_UNUSED(maxDistance);
+    PX_UNUSED(cachedIndex);
 
 	if (!triangleCount)
 		return false;
@@ -337,7 +339,6 @@ bool physx::PxMeshQuery::raycast(const PxVec3& rayOrig,
 		const auto& v0 = trangles[iTri].verts[0];
 		const auto& v1 = trangles[iTri].verts[1];
 		const auto& v2 = trangles[iTri].verts[2];
-		PxReal tu, tv;
 		auto ret = intersectRayTriangle(rayOrig, rayNormDir, v0, v1, v2, t, u, v, isCulling, inflation);
 		if (ret && t < raycastHit.distance && t >= 0.0f)
 		{

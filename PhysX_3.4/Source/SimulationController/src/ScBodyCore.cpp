@@ -213,7 +213,6 @@ void Sc::BodyCore::clearSpatialAcceleration(bool force, bool torque)
 
 void Sc::BodyCore::getSpatialAcceleration(PxVec3* linAcc, PxVec3* angAcc)
 {
-	BodySim* sim = getSim();
 
 	if (!mSimStateData || !mSimStateData->isVelMod())
 		return;
@@ -272,7 +271,6 @@ void Sc::BodyCore::clearSpatialVelocity(bool force, bool torque)
 
 void Sc::BodyCore::getSpatialVelocity(PxVec3* linVelDelta, PxVec3* angVelDelta)
 {
-	BodySim* sim = getSim();
 
 	if (!mSimStateData || !mSimStateData->isVelMod())
 		return;

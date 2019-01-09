@@ -14,7 +14,7 @@
 #pragma once
 
 #include "CmPhysXCommon.h"
-#include "PxVec3.h"
+#include "foundation/PxVec3.h"
 
 namespace physx
 {

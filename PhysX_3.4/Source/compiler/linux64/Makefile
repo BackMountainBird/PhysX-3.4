@@ -6,9 +6,9 @@ DEPSDIR = .deps
 OBJS_DIR  = build
 RMDIR     = rm -fr
 ECHO      = echo
-CCLD      =  g++
-CXX       =  g++
-CC        =  gcc
+CCLD      =  g++ -std=c++11
+CXX       =  g++ -std=c++11
+CC        =  gcc -std=c++11
 RANLIB    = ranlib
 AR		 = ar
 STRIP     = strip

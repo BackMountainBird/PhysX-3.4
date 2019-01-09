@@ -502,7 +502,6 @@ static void visualizeTriangleMesh(const PxTriangleMeshGeometry& geometry, Render
 			out << Cm::RenderOutput::TRIANGLES;
 			for (PxU32 i = 0; i < nbTriangles; i++)
 			{
-				const PxU32 index = results[i];
 				PxVec3 wp[3];
 				getTriangle(*triangleMesh, results[i], wp, vertices, indices, absPose, has16Bit);
 				out << wp[0] << wp[1] << wp[2];

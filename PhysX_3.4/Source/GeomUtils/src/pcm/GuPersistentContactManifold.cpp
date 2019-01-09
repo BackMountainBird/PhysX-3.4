@@ -919,7 +919,7 @@ void Gu::PersistentContactManifold::reduceBatchContactsCluster(const PersistentC
 	using namespace Ps::aos;
 	//get the deepest points
 
-	bool chosen[64];
+	bool chosen[numPoints];
 	physx::PxMemZero(chosen, sizeof(bool)*numPoints);
 	const FloatV max = FMax();
 	const FloatV nmax = FNeg(max);

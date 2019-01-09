@@ -74,7 +74,7 @@ namespace Cct
 		virtual	void								resize(PxReal height)				override;
 
 		virtual		void							setNewCollision(bool val) override { mUserParams.mNewCollision = val; };
-		virtual		bool							getNewCollision(bool val) const override { return mUserParams.mNewCollision; };
+		virtual		bool							getNewCollision(bool val) const override {PX_UNUSED(val); return mUserParams.mNewCollision; };
 		virtual		void							setNewCollisionFriction(PxReal val) override { mUserParams.mNewCollisionFricition = val; };
 		virtual		PxReal							getNewCollisionFriction() const override { return mUserParams.mNewCollisionFricition; };
 		//~PxController

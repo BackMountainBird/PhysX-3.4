@@ -305,6 +305,51 @@ PxFilterFlags physx::PxDefaultSimulationFilterShader(
 	return PxFilterFlags();
 }
 
+PxFilterFlags physx::PxDefaultSimulationFilterShader2(
+	PxFilterObjectAttributes attributes0,
+	PxFilterData filterData0,
+	PxFilterObjectAttributes attributes1,
+	PxFilterData filterData1,
+	PxPairFlags& pairFlags,
+	const void* constantBlock,
+	PxU32 constantBlockSize)
+{
+	PX_UNUSED(constantBlock);
+	PX_UNUSED(constantBlockSize);
+
+	// let triggers through
+	if (PxFilterObjectIsTrigger(attributes0) || PxFilterObjectIsTrigger(attributes1))
+	{
+		pairFlags = PxPairFlag::eTRIGGER_DEFAULT;
+	}
+	else
+	{
+		pairFlags = PxPairFlag::eCONTACT_DEFAULT | PxPairFlag::eNOTIFY_TOUCH_FOUND | PxPairFlag::eNOTIFY_CONTACT_POINTS;
+	}
+
+	// Collision Group
+	if (!gCollisionTable[filterData0.word0][filterData1.word0]())
+	{
+		return PxFilterFlag::eSUPPRESS;
+	}
+
+	// Filter function
+	PxGroupsMask g0 = convert(filterData0);
+	PxGroupsMask g1 = convert(filterData1);
+
+	PxGroupsMask g0k0;	gTable[gFilterOps[0]](g0k0, g0, gFilterConstants[0]);
+	PxGroupsMask g1k1;	gTable[gFilterOps[1]](g1k1, g1, gFilterConstants[1]);
+	PxGroupsMask final;	gTable[gFilterOps[2]](final, g0k0, g1k1);
+
+	bool r = final.bits0 || final.bits1 || final.bits2 || final.bits3;
+	if (r != gFilterBool)
+	{
+		return PxFilterFlag::eSUPPRESS;
+	}
+
+	return PxFilterFlags();
+}
+
 bool physx::PxGetGroupCollisionFlag(const PxU16 group1, const PxU16 group2)
 {
 	PX_CHECK_AND_RETURN_NULL(group1 < 32 && group2 < 32, "Group must be less than 32");	

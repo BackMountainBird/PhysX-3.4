@@ -2205,7 +2205,9 @@ bool SweepTest::doRotateTest(const InternalCBData_FindTouchedGeom* userData,
 
 	PX_PROFILE_ZONE("CharacterController.doRotateTest", contextID);
 	PX_UNUSED(contextID);
-
+	PX_UNUSED(userHitData);
+	PX_UNUSED(sweepPass);
+	
 	slidingVector = PxVec3(0.0f);
 
 	TouchedGeom* touchedGeom = nullptr;
@@ -3302,6 +3304,7 @@ PxControllerCollisionFlags BoxController::move(const PxVec3& disp, PxF32 minDist
 
 PxControllerCollisionFlags BoxController::moveWithRotate(const PxVec3& disp, PxF32 minDist, PxF32 rotAngle, PxF32 elapsedTime, const PxControllerFilters& filters, const PxObstacleContext* obstacles)
 {
+	PX_UNUSED(rotAngle);
 	return BoxController::move(disp, minDist, elapsedTime, filters, obstacles);
 }
 
@@ -3323,6 +3326,7 @@ PxControllerCollisionFlags CapsuleController::move(const PxVec3& disp, PxF32 min
 
 PxControllerCollisionFlags CapsuleController::moveWithRotate(const PxVec3& disp, PxF32 minDist, PxF32 rotAngle, PxF32 elapsedTime, const PxControllerFilters& filters, const PxObstacleContext* obstacles)
 {
+	PX_UNUSED(rotAngle);
 	return CapsuleController::move(disp, minDist, elapsedTime, filters, obstacles);
 }
 
